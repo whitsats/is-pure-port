@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="I’s Pure 从 PS2 原盘到 WebGAL、Android 的素材、剧本和演出移植过程。">
+  <title>I’s Pure · WebGAL／安卓移植</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="port">
+  <header class="top wrap">
+    <a class="wordmark" href="./">I’s Pure <span>移植工程</span></a>
+    <nav aria-label="页面导航"><a href="#pipeline">移植流程</a><a href="#build">构建入口</a><a href="https://github.com/whitsats/is-pure-port">源码 ↗</a></nav>
+  </header>
+  <main>
+    <section class="hero wrap">
+      <div>
+        <p class="eyebrow">PS2 → WebGAL → Android</p>
+        <h1>让原盘剧情<br>在新平台运行。</h1>
+        <p class="intro">拆解原盘的素材和 MAC 指令，核对每次选择、切场和声音起止，再生成能在网页与安卓离线播放的场景。</p>
+        <div class="actions"><a class="primary" href="https://github.com/whitsats/is-pure-port/blob/main/docs/移植过程.md">阅读移植过程</a><a href="https://whitsats.github.io/is-pure-zh/">PS2 汉化项目 ↗</a></div>
+      </div>
+      <figure class="hero-figure">
+        <div class="figure-title"><span>01 / 运行路径</span><span>输入 → 输出</span></div>
+        <div class="diagram"><div><b>PS2 原盘</b><small>ISO / AFS / MAC</small></div><span aria-hidden="true">↓</span><div><b>提取与转换</b><small>素材 · 译文地址 · 分支状态</small></div><span aria-hidden="true">↓</span><div><b>WebGAL 网页</b><small>安卓外壳加载同一套离线场景</small></div></div>
+        <figcaption>把原盘可复核的行为转为场景，保留每一步的脚本和验证入口。</figcaption>
+      </figure>
+    </section>
+    <div class="metrics wrap" aria-label="本地运行规格">
+      <div><strong>2400×1080</strong><span>安卓片头原始分辨率</span></div>
+      <div><strong>12 卷</strong><span>漫画目录与书签</span></div>
+      <div><strong>2,982</strong><span>可逐页访问的漫画页</span></div>
+    </div>
+    <section class="section wrap" id="pipeline">
+      <div class="section-head"><p class="eyebrow">技术流程</p><h2>先核对，再重现</h2></div>
+      <ol class="pipeline">
+        <li><span>01</span><h3>拆盘取素材</h3><p>扫描 ISO 和 AFS，定位图像、立绘、语音和影片，保留源尺寸与透明边。</p></li>
+        <li><span>02</span><h3>解释 MAC</h3><p>读取剧本指令、分支标签和跨场景入口，按地址对齐汉化文本。</p></li>
+        <li><span>03</span><h3>生成场景</h3><p>映射画面、音效和状态变化。保留未知指令的偏移和诊断报告。</p></li>
+        <li><span>04</span><h3>逐项验证</h3><p>回放代表线路，检查图鉴、存档、选项条件，再用实体安卓验证片头与离线资源。</p></li>
+      </ol>
+    </section>
+    <section class="section wrap two-col" id="build">
+      <div class="section-head"><p class="eyebrow">从源码开始</p><h2>运行你自己准备的素材</h2><p>仓库提供转换脚本、测试和两份源码补丁。按构建说明准备对应的 WebGAL 引擎、安卓外壳和本地资源。</p><a href="https://github.com/whitsats/is-pure-port/blob/main/docs/构建与本地素材.md">打开构建说明 ↗</a></div>
+      <div class="ledger">
+        <div><span>WebGAL</span><p>剧情场景、转场、图鉴、选项与漫画阅读。</p></div>
+        <div><span>Android</span><p>原生高清片头、WebView 离线资源映射与前后台管理。</p></div>
+        <div><span>Python</span><p>原盘资源提取、MAC 转换、漫画分卷和验收。</p></div>
+      </div>
+    </section>
+  </main>
+  <footer class="wrap footer"><span>I’s Pure · WebGAL／安卓移植</span><p>公开页面展示过程与源码。原盘、完整游戏资源、漫画和存档请自行准备并留在本地。</p></footer>
+</body>
+</html>

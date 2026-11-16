@@ -2,6 +2,8 @@
 
 记录如何把 PS2 版《I"s Pure》的场景、演出和流程转换到 WebGAL，并用安卓外壳离线运行。这个仓库提供过程、转换与验收脚本，以及相对上游引擎的源码补丁。
 
+[查看图解项目页](https://whitsats.github.io/is-pure-port/)
+
 PS2 汉化是独立项目，原机补丁、翻译对照和打盘说明见 [is-pure-zh](https://github.com/whitsats/is-pure-zh)。
 
 | 想了解什么 | 从哪里开始 |

@@ -3,52 +3,103 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="I’s Pure 从 PS2 原盘到 WebGAL、Android 的素材、剧本和演出移植过程。">
-  <title>I’s Pure · WebGAL／安卓移植</title>
+  <meta name="description" content="《I’s Pure》WebGAL 与安卓移植，作品介绍、汉化历程、致谢与技术记录。">
+  <title>I’s Pure｜WebGAL 与安卓移植</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="port">
-  <header class="top wrap">
-    <a class="wordmark" href="./">I’s Pure <span>移植工程</span></a>
-    <nav aria-label="页面导航"><a href="#pipeline">移植流程</a><a href="#build">构建入口</a><a href="https://github.com/whitsats/is-pure-port">源码 ↗</a></nav>
+  <a class="skip" href="#main">跳到正文</a>
+  <header class="mast wrap">
+    <a class="brand" href="./">I’s Pure</a>
+    <nav aria-label="站点导航">
+      <a href="#story">作品</a><a href="#history">历程</a><a href="#credits">致谢</a><a href="#tech">技术</a>
+      <a href="https://github.com/whitsats/is-pure-port">GitHub</a>
+    </nav>
   </header>
-  <main>
-    <section class="hero wrap">
-      <div>
-        <p class="eyebrow">PS2 → WebGAL → Android</p>
-        <h1>让原盘剧情<br>在新平台运行。</h1>
-        <p class="intro">拆解原盘的素材和 MAC 指令，核对每次选择、切场和声音起止，再生成能在网页与安卓离线播放的场景。</p>
-        <div class="actions"><a class="primary" href="https://github.com/whitsats/is-pure-port/blob/main/docs/移植过程.md">阅读移植过程</a><a href="https://whitsats.github.io/is-pure-zh/">PS2 汉化项目 ↗</a></div>
+  <main class="wrap" id="main">
+    <section class="feature" id="story" aria-labelledby="title">
+      <div class="feature-copy">
+        <h1 id="title">I’s Pure<span>WebGAL 与安卓移植</span></h1>
+        <p class="lead">把 PS2 版的剧情、选项和声画演出逐段核对，再转成 WebGAL 场景。安卓外壳使用同一套场景，并接管冷启动片头、离线资源和前后台切换。</p>
+        <div class="links">
+          <a class="button" href="https://github.com/whitsats/is-pure-port/releases/tag/v0.8">v0.8 源码发布</a>
+          <a href="https://whitsats.github.io/is-pure-zh/">PS2 简体中文汉化</a>
+        </div>
+        <div class="synopsis">
+          <h2>关于这部作品</h2>
+          <p>高中生濑户一贵喜欢同班的苇月伊织。两人一起筹备迎新活动，终于有机会熟悉起来。就在一贵想靠近伊织的时候，从小认识的秋叶季子又回到了他的生活里。</p>
+          <p>故事出自桂正和的漫画《I’s》。同名 OVA 在 2005 至 2006 年发行，PS2 恋爱冒险游戏于 2006 年 11 月 9 日在日本发售，盘号为 <span class="nowrap">SLPM-66570</span>。</p>
+          <p class="note"><a href="https://www.shueisha.co.jp/books/items/contents.html?jdcn=08619371872411315501">集英社书目</a> · <a href="https://pierrot.jp/archive/ova/title51.html">Studio Pierrot 动画档案</a> · <a href="https://psxdatacenter.com/psx2/games2/SLPM-66570.html">Regista 游戏目录</a></p>
+        </div>
       </div>
-      <figure class="hero-figure">
-        <div class="figure-title"><span>01 / 运行路径</span><span>输入 → 输出</span></div>
-        <div class="diagram"><div><b>PS2 原盘</b><small>ISO / AFS / MAC</small></div><span aria-hidden="true">↓</span><div><b>提取与转换</b><small>素材 · 译文地址 · 分支状态</small></div><span aria-hidden="true">↓</span><div><b>WebGAL 网页</b><small>安卓外壳加载同一套离线场景</small></div></div>
-        <figcaption>把原盘可复核的行为转为场景，保留每一步的脚本和验证入口。</figcaption>
+      <figure class="cover">
+        <img src="images/iori.webp" width="1240" height="868" alt="PS2 游戏中苇月伊织的近景">
+        <figcaption>苇月伊织。图片选自项目整理的《I’s Pure》高清游戏素材。</figcaption>
       </figure>
     </section>
-    <div class="metrics wrap" aria-label="本地运行规格">
-      <div><strong>2400×1080</strong><span>安卓片头原始分辨率</span></div>
-      <div><strong>12 卷</strong><span>漫画目录与书签</span></div>
-      <div><strong>2,982</strong><span>可逐页访问的漫画页</span></div>
-    </div>
-    <section class="section wrap" id="pipeline">
-      <div class="section-head"><p class="eyebrow">技术流程</p><h2>先核对，再重现</h2></div>
-      <ol class="pipeline">
-        <li><span>01</span><h3>拆盘取素材</h3><p>扫描 ISO 和 AFS，定位图像、立绘、语音和影片，保留源尺寸与透明边。</p></li>
-        <li><span>02</span><h3>解释 MAC</h3><p>读取剧本指令、分支标签和跨场景入口，按地址对齐汉化文本。</p></li>
-        <li><span>03</span><h3>生成场景</h3><p>映射画面、音效和状态变化。保留未知指令的偏移和诊断报告。</p></li>
-        <li><span>04</span><h3>逐项验证</h3><p>回放代表线路，检查图鉴、存档、选项条件，再用实体安卓验证片头与离线资源。</p></li>
-      </ol>
+    <section class="download" aria-labelledby="version">
+      <h2 id="version">关于 v0.8</h2>
+      <div>
+          <p>公开版本包含提取和转换脚本、测试，以及 WebGAL 与安卓外壳的两份补丁。完整运行所需的原盘与游戏素材需自行准备。</p>
+          <p>v0.8 的安卓片头保留 2400×1080 视频，点一次「跳过片头」即可进入标题。冷启动与标题页回放均已验证。</p>
+      </div>
     </section>
-    <section class="section wrap two-col" id="build">
-      <div class="section-head"><p class="eyebrow">从源码开始</p><h2>运行你自己准备的素材</h2><p>仓库提供转换脚本、测试和两份源码补丁。按构建说明准备对应的 WebGAL 引擎、安卓外壳和本地资源。</p><a href="https://github.com/whitsats/is-pure-port/blob/main/docs/构建与本地素材.md">打开构建说明 ↗</a></div>
-      <div class="ledger">
-        <div><span>WebGAL</span><p>剧情场景、转场、图鉴、选项与漫画阅读。</p></div>
-        <div><span>Android</span><p>原生高清片头、WebView 离线资源映射与前后台管理。</p></div>
-        <div><span>Python</span><p>原盘资源提取、MAC 转换、漫画分卷和验收。</p></div>
+    <section class="article" id="history" aria-labelledby="history-title">
+      <div>
+        <h2 id="history-title">汉化历程</h2>
+        <dl class="timeline">
+          <dt>2011–2023</dt><dd>PS2 汉化始于百度贴吧 IS 吧。翻译、校对和破解前辈陆续整理了 IS01–06 的对白、菜单译文和字集。</dd>
+          <dt>2026 年 11 月</dt><dd>原机汉化补完 IS07–16，修订系统文本与字库。v7.4 补齐四个新字形，成为本次移植对齐译文的基准。</dd>
+          <dt>移植独立维护</dt><dd>按原盘 MAC 指令和 PS2 汉化地址复核对白，再逐项重建选项、图鉴、转场和音画时序。原机补丁仍由汉化项目发布。</dd>
+        </dl>
+        <p class="note"><a href="https://github.com/whitsats/is-pure-zh#历史">阅览汉化项目的完整记录</a></p>
+      </div>
+      <figure class="book">
+        <div class="book-images">
+          <img src="images/complete-edition-01.webp" width="464" height="660" alt="《I’s》完全版第 1 卷封面，画着苇月伊织" loading="lazy">
+          <img src="images/complete-edition-02.webp" width="464" height="660" alt="《I’s》完全版第 2 卷封面，画着濑户一贵" loading="lazy">
+        </div>
+        <figcaption>桂正和《I’s》完全版第 1、2 卷，取自项目整理的漫画 PDF 封面。</figcaption>
+      </figure>
+    </section>
+    <section class="section" id="credits" aria-labelledby="credits-title">
+      <h2 id="credits-title">致谢</h2>
+      <div class="prose">
+        <p>感谢百度贴吧 IS 吧和 QQ 群「IS汉化讨论」，也感谢多年间留下翻译、校对、字集和破解成果的前辈。</p>
+        <dl class="credits">
+          <dt>翻译</dt><dd>淡淡地调、琉璃扶桑、z59413286、arttest</dd>
+          <dt>校对</dt><dd>水晶骷髅、霜舞</dd>
+          <dt>润色</dt><dd>细雨清风</dd>
+          <dt>破解</dt><dd>Led</dd>
+          <dt>QQ 群管理</dt><dd>群主（—_—），管理员 she4d、我舞着萝卜🌐、霜舞、Led</dd>
+        </dl>
+        <p class="note">以上沿用汉化项目的署名，排名不分先后，ID 以群内显示为准。</p>
+        <p>感谢 WebGAL 和 WebGAL-Android 的维护者。两个上游项目提供了网页运行时与安卓宿主。</p>
+      </div>
+    </section>
+    <section class="section" id="tech" aria-labelledby="tech-title">
+      <h2 id="tech-title">技术分享</h2>
+      <div class="prose">
+        <figure class="scene">
+          <img src="images/school-scene.webp" width="1240" height="868" alt="《I’s Pure》学校场景，人物在教室中交谈" loading="lazy">
+          <figcaption>高清素材包中的教室场景。移植时按原盘指令核对这类画面的出现时点与对应对白。</figcaption>
+        </figure>
+        <h3>从 MAC 指令还原剧情分支</h3>
+        <p>先记录 ISO 与 AFS 容器的条目及偏移，再按 MAC 指令地址对齐文本。跨剧本入口、条件判断和状态写入都要和 PS2 实测交叉验证。转换遇到证据不足的指令时，在报告里保留原位置。</p>
+        <figure class="scheme">
+          <ol class="route"><li>ISO / AFS<br><small>文件与偏移</small></li><li>MAC<br><small>指令与分支</small></li><li>WebGAL<br><small>剧情与演出</small></li></ol>
+          <figcaption>转换顺序。让场景中的选项可以追溯到原盘指令。</figcaption>
+        </figure>
+        <h3>安卓冷启动为什么单独处理</h3>
+        <p>外壳先用原生播放器打开 faststart 片头，返回标题时再由 WebView 接管。回归覆盖片头自然结束、单击跳过和进入后台后的音频状态。</p>
+        <ul class="source-list">
+          <li><a href="https://github.com/whitsats/is-pure-port/blob/main/docs/移植过程.md">素材、剧本与演出转换流程</a></li>
+          <li><a href="https://github.com/whitsats/is-pure-port/blob/main/docs/构建与本地素材.md">WebGAL 与安卓构建说明</a></li>
+          <li><a href="https://github.com/whitsats/is-pure-port/tree/main/patches">引擎与安卓外壳源码补丁</a></li>
+        </ul>
       </div>
     </section>
   </main>
-  <footer class="wrap footer"><span>I’s Pure · WebGAL／安卓移植</span><p>公开页面展示过程与源码。原盘、完整游戏资源、漫画和存档请自行准备并留在本地。</p></footer>
+  <footer class="wrap foot"><span>I’s Pure · 非官方同人项目<br>漫画原作与游戏画面权利归各自权利方。</span><a href="https://github.com/whitsats/is-pure-port/releases">所有发布</a></footer>
 </body>
 </html>

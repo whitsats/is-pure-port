@@ -2,7 +2,7 @@
 
 步骤：
   1. 按 ISO9660 目录中的 LBA/大小直接从镜像切出 .pss；
-  2. 用 ffmpeg 探测/转码为 MP4（H.264 + AAC），同时保留原始 .pss。
+  2. 用 ffmpeg 探测并输出无声 H.264 MP4，供 MV音频修复/提取并合成.py 合成。
 """
 from __future__ import annotations
 
@@ -76,10 +76,18 @@ def main() -> None:
                 continue
             stem = name.rsplit(".", 1)[0]
             dst = OUT / name
-            f.seek(meta["lba"] * SECTOR)
-            data = f.read(meta["size"])
-            dst.write_bytes(data)
-            print(f"\n提取 {name} -> {dst} ({len(data)} B)")
+            if dst.exists():
+                if dst.stat().st_size != meta["size"]:
+                    raise ValueError(f"已有 PSS 的大小与原盘条目不一致：{dst}")
+                print(f"\n沿用已提取的 PSS：{dst}")
+            else:
+                f.seek(meta["lba"] * SECTOR)
+                data = f.read(meta["size"])
+                if len(data) != meta["size"]:
+                    raise ValueError(f"原盘 PSS 条目不完整：{name}")
+                with dst.open("xb") as output:
+                    output.write(data)
+                print(f"\n提取 {name} -> {dst} ({len(data)} B)")
 
             # 探测
             probe = subprocess.run(
@@ -106,12 +114,16 @@ def main() -> None:
                 print(f"    ffprobe stderr: {probe.stderr.strip()[:400]}")
                 continue
 
-            # 转 MP4
+            # 输出供音轨合成的画面。已有 MP4 可能已经带修复后的音轨。
             mp4 = OUT / f"{stem}.mp4"
+            if mp4.exists():
+                print(f"  沿用已有 MP4：{mp4}")
+                continue
             conv = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(dst),
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-n", "-i", str(dst),
+                 "-map", "0:v:0", "-an",
                  "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", str(mp4)],
+                 "-pix_fmt", "yuv420p", str(mp4)],
                 capture_output=True, text=True,
             )
             if conv.returncode == 0:
@@ -121,7 +133,7 @@ def main() -> None:
                 # 退化：只抽视频轨
                 m2v = OUT / f"{stem}.m2v"
                 conv2 = subprocess.run(
-                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(dst),
+                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-n", "-i", str(dst),
                      "-c:v", "copy", "-an", str(m2v)],
                     capture_output=True, text=True,
                 )

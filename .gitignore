@@ -14,7 +14,11 @@
 /移植验证/MAC_反汇编/
 /移植验证/MAC_命令表/
 /移植验证/MAC_文本语音/
-/移植验证/MV音频修复/
+/移植验证/MV音频修复/*
+!/移植验证/MV音频修复/提取并合成.py
+!/移植验证/MV音频修复/比对录屏.py
+!/移植验证/MV音频修复/验证记录.md
+!/移植验证/MV音频修复/test_pss.py
 /移植验证/ps2-vn-tool-reference/
 node_modules/
 __pycache__/

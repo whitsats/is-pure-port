@@ -1,0 +1,1621 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index 6ad79ea..dc7c4fb 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -8,11 +8,11 @@ android {
+     compileSdk 35
+ 
+     defaultConfig {
+-        applicationId "com.openwebgal.demo"
++        applicationId "dev.ispure.webgal.prototype"
+         minSdk 21
+         targetSdk 34
+-        versionCode 1
+-        versionName "1.0"
++        versionCode 7
++        versionName "0.7"
+ 
+         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+     }
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index b28f48c..db0192d 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -3,10 +3,14 @@
+     xmlns:tools="http://schemas.android.com/tools">
+ 
+     <uses-permission android:name="android.permission.INTERNET" />
++    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
++    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" tools:ignore="ScopedStorage" />
++    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+ 
+     <application
+         android:allowBackup="true"
+-        android:icon="@mipmap/ic_launcher"
++        android:icon="@drawable/is_pure_launcher"
++        android:roundIcon="@drawable/is_pure_launcher"
+         android:label="@string/app_name"
+         android:supportsRtl="true"
+         android:theme="@style/Theme.WebGAL"
+@@ -15,7 +19,7 @@
+         <activity
+             android:name=".MainActivity"
+             android:screenOrientation="sensorLandscape"
+-            android:configChanges="keyboardHidden|orientation|screenSize"
++            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize"
+             android:hardwareAccelerated="true"
+             android:exported="true">
+             <intent-filter>
+@@ -26,4 +30,4 @@
+     </application>
+ 
+ 
+-</manifest>
+\ No newline at end of file
++</manifest>
+diff --git a/app/src/main/java/com/openwebgal/demo/MainActivity.kt b/app/src/main/java/com/openwebgal/demo/MainActivity.kt
+index 554b7c7..afe7c68 100644
+--- a/app/src/main/java/com/openwebgal/demo/MainActivity.kt
++++ b/app/src/main/java/com/openwebgal/demo/MainActivity.kt
+@@ -2,18 +2,27 @@ package com.openwebgal.demo
+ 
+ import android.annotation.SuppressLint
+ import android.app.Activity
++import android.app.AlertDialog
++import android.app.ProgressDialog
+ import android.content.Context
+ import android.content.Intent
++import android.content.pm.ActivityInfo
++import android.content.pm.PackageManager
+ import android.graphics.Bitmap
+-import android.media.AudioManager
+ import android.net.Uri
+ import android.os.Build
+ import android.os.Bundle
++import android.os.Environment
++import android.provider.DocumentsContract
++import android.provider.Settings
+ import android.util.Base64
++import android.util.Log
++import android.view.KeyEvent
+ import android.view.View
+ import android.view.WindowInsets
+ import android.view.WindowManager
+ import android.webkit.*
++import android.widget.FrameLayout
+ import android.widget.Toast
+ import androidx.appcompat.app.AppCompatActivity
+ import androidx.browser.customtabs.CustomTabsIntent
+@@ -22,32 +31,108 @@ import androidx.webkit.WebViewAssetLoader.AssetsPathHandler
+ import androidx.webkit.WebViewClientCompat
+ import androidx.core.graphics.createBitmap
+ import androidx.core.net.toUri
++import androidx.core.view.ViewCompat
++import androidx.core.view.WindowInsetsCompat
++import java.io.BufferedInputStream
++import java.io.File
++import java.io.FileInputStream
++import java.io.FileOutputStream
++import java.io.InputStream
++import java.io.RandomAccessFile
++import java.util.zip.ZipEntry
++import java.util.zip.ZipInputStream
+ 
+ class MainActivity : AppCompatActivity() {
+ 
+     private lateinit var webView: WebView
+-    private var audioManager: AudioManager? = null
++    private lateinit var content: FrameLayout
++    private var openingPlayer: StartupOpening? = null
++    @Volatile private var openingResult = ""
++    @Volatile private var toolbarInsets = "0,0,0"
++    @Volatile private var appInForeground = false
++    private var safeLeft = 0
++    private var safeRight = 0
++    private var safeBottom = 0
+     private var saveLoadPath: ValueCallback<Array<Uri>>? = null
+     private var saveData: String? = null
+     private val FILECHOOSER_REQUEST_CODE = 0
+     private val FILECREATE_REQUEST_CODE = 1
++    private val FOLDER_PICKER_REQUEST_CODE = 1001
++    private val PERMISSION_REQUEST_CODE = 1002
++    private val ZIP_PICKER_REQUEST_CODE = 1003
++    private val PATCH_PICKER_REQUEST_CODE = 1004
++    private val TAG = "WebGAL_MainActivity"
+ 
++    // 方案 B：外部离线存储目录与状态管理
++    private var activeGameDir: File? = null
++    private var pendingFolderToApply: File? = null
++    private val hdOpening by lazy {
++        cacheOpening("MV_OP01_phone60.mp4", "MV_OP01_phone60_v7")
++    }
++
++    private fun cacheOpening(fileName: String, cacheName: String): File {
++        val assetPath = "webgal/$fileName"
++        val expectedLength = assets.openFd(assetPath).use { it.length }
++        val target = File(cacheDir, "$cacheName.mp4")
++        if (!target.isFile || target.length() != expectedLength) {
++            val temporary = File(cacheDir, "$cacheName.part")
++            assets.open(assetPath).use { source ->
++                temporary.outputStream().use { destination -> source.copyTo(destination) }
++            }
++            check(temporary.length() == expectedLength) { "内置片头不完整" }
++            check(temporary.renameTo(target)) { "无法准备内置片头" }
++        }
++        return target
++    }
+ 
+     @SuppressLint("JavascriptInterface", "SetJavaScriptEnabled")
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+-        fullscreen() //全屏
+-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) //屏幕保持开启
++        fullscreen() // 全屏沉浸式
++        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) // 屏幕长亮
+ 
+         webView = WebView(this)
+-        setContentView(webView)
++        content = FrameLayout(this).apply { addView(webView) }
++        setContentView(content)
++        ViewCompat.setOnApplyWindowInsetsListener(content) { _, insets ->
++            val bars = insets.getInsetsIgnoringVisibility(
++                WindowInsetsCompat.Type.navigationBars() or WindowInsetsCompat.Type.displayCutout()
++            )
++            val gestures = insets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())
++            safeLeft = maxOf(bars.left, gestures.left)
++            safeRight = maxOf(bars.right, gestures.right)
++            safeBottom = maxOf(bars.bottom, gestures.bottom)
++            val density = resources.displayMetrics.density
++            toolbarInsets = listOf(safeLeft, safeRight, safeBottom)
++                .joinToString(",") { kotlin.math.ceil(it / density).toInt().toString() }
++            openingPlayer?.setSafeMargins(safeLeft, safeRight, safeBottom)
++            webView.evaluateJavascript("window.webgalUpdateToolbarInsets && window.webgalUpdateToolbarInsets()", null)
++            insets
++        }
++        ViewCompat.requestApplyInsets(content)
+ 
+         webView.settings.javaScriptEnabled = true
+         webView.settings.mediaPlaybackRequiresUserGesture = false
+         webView.settings.domStorageEnabled = true
+-        webView.setInitialScale(100)
++        webView.settings.allowFileAccess = true
++        webView.settings.allowContentAccess = true
++        webView.settings.useWideViewPort = true
+         webView.overScrollMode = View.OVER_SCROLL_NEVER
+ 
++        // 外部离线存储目录解析（持久化路径 -> 默认沙盒 -> 常见目录自动探测）
++        activeGameDir = resolveActiveGameDir()
++        if (activeGameDir == null) {
++            val detectedZip = detectGameZipFile()
++            if (detectedZip != null) {
++                showFoundZipPrompt(detectedZip)
++            } else {
++                showMissingResourceDialog()
++            }
++        } else {
++            Log.i(TAG, "已挂载外部离线资源目录: ${activeGameDir?.absolutePath}")
++        }
++
++        // 内置 assets 资产分发器（加载前端框架 HTML/JS/CSS）
+         val assetLoader = WebViewAssetLoader.Builder()
+             .addPathHandler("/assets/", AssetsPathHandler(this))
+             .build()
+@@ -57,6 +142,44 @@ class MainActivity : AppCompatActivity() {
+                 webView: WebView,
+                 request: WebResourceRequest
+             ): WebResourceResponse? {
++                val urlStr = request.url.toString()
++                val decodedUrl = Uri.decode(urlStr)
++
++                // 核心：方案 B 外部离线资源映射拦截 (/assets/webgal/game/ -> 外部存储目录)
++                val gamePrefix = "/assets/webgal/game/"
++                if (decodedUrl.contains(gamePrefix)) {
++                    val relativeSubPath = decodedUrl.substringAfter(gamePrefix).substringBefore('?').substringBefore('#')
++                    val dir = activeGameDir ?: resolveActiveGameDir()
++                    val bundledOpening = if (request.url.host == "appassets.androidplatform.net" &&
++                        relativeSubPath == "video/MV_OP01_phone60.mp4") {
++                        runCatching { hdOpening }.getOrNull()
++                    } else null
++                    val targetFile = bundledOpening ?: if (dir != null) {
++                        File(dir, relativeSubPath).takeIf { it.exists() && it.isFile }
++                    } else null
++
++                    if (targetFile != null) {
++                        val mimeType = getMimeType(targetFile.name)
++                        val rangeHeader = request.requestHeaders.entries
++                            .firstOrNull { it.key.equals("Range", ignoreCase = true) }?.value
++                        val encoding = if (isTextMime(mimeType)) "UTF-8" else null
++
++                        // 支持视频与音频的 HTTP 206 Partial Content 分段流式播放
++                        return if (rangeHeader != null && targetFile.length() > 0) {
++                            handleRangeRequest(targetFile, mimeType, rangeHeader)
++                        } else {
++                            val headers = mutableMapOf(
++                                "Access-Control-Allow-Origin" to "*",
++                                "Accept-Ranges" to "bytes",
++                                "Content-Length" to targetFile.length().toString(),
++                                "Cache-Control" to "public, max-age=3600"
++                            )
++                            WebResourceResponse(mimeType, encoding, 200, "OK", headers, FileInputStream(targetFile))
++                        }
++                    }
++                }
++
++                // 默认内置 Assets 加载
+                 val interceptedRequest = assetLoader.shouldInterceptRequest(
+                     Uri.decode(request.url.toString()).toUri()
+                 )
+@@ -72,25 +195,23 @@ class MainActivity : AppCompatActivity() {
+                 webView: WebView,
+                 request: WebResourceRequest
+             ): Boolean {
+-                // 使用 Custom Tabs 打开外部链接
+                 val intent = CustomTabsIntent.Builder().build()
+                 intent.launchUrl(this@MainActivity, request.url)
+                 return true
+             }
+         }
+ 
+-        webView.loadUrl(getString(R.string.load_url))
+-
++        // 注册 JavascriptInterface：存档导出与屏幕方向翻转桥接
+         webView.addJavascriptInterface(ExportInterface(), "Export")
++        webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
++
+         webView.setDownloadListener { url, _, _, _, _ ->
+-            //获取 Blob 数据
+             if (url.startsWith("blob:")) {
+                 getBlobData(url)
+-            } else return@setDownloadListener
++            }
+         }
+ 
+         webView.webChromeClient = object : WebChromeClient() {
+-            //导入存档与选项
+             override fun onShowFileChooser(
+                 webView: WebView,
+                 filePathCallback: ValueCallback<Array<Uri>>,
+@@ -99,20 +220,218 @@ class MainActivity : AppCompatActivity() {
+                 return chooseFile(filePathCallback)
+             }
+ 
+-            //移除默认播放海报
+             override fun getDefaultVideoPoster(): Bitmap {
+                 return createBitmap(10, 10)
+             }
+ 
+-            //退出游戏
+             override fun onCloseWindow(window: WebView?) {
+                 super.onCloseWindow(window)
+                 this@MainActivity.finish()
+             }
+         }
++        if (activeGameDir != null) loadGamePage()
++    }
++
++    private fun loadGamePage() {
++        if (openingPlayer != null) return
++        if (openingResult.isEmpty()) {
++            val player = StartupOpening(this) { rendered, interrupted ->
++                openingResult = when {
++                    rendered && interrupted -> "interrupted"
++                    rendered -> "played"
++                    else -> "unavailable"
++                }
++                openingPlayer?.let(content::removeView)
++                openingPlayer = null
++                loadGamePage()
++                checkAndApplyVideoPatch()
++            }
++            openingPlayer = player
++            webView.visibility = View.INVISIBLE
++            player.setSafeMargins(safeLeft, safeRight, safeBottom)
++            content.addView(player, FrameLayout.LayoutParams(
++                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
++            ))
++            Thread {
++                val clip = runCatching { hdOpening }
++                    .onFailure { Log.e(TAG, "Cannot open bundled HD opening", it) }
++                    .getOrNull()
++                runOnUiThread { if (openingPlayer === player) player.play(clip) }
++            }.start()
++            return
++        }
++        Log.i(TAG, "Loading title after native opening: $openingResult")
++        webView.visibility = View.VISIBLE
++        webView.loadUrl(getString(R.string.load_url))
++    }
++
++    /**
++     * 精确切片输入流，支持 O(1) 随机 Seek，严格按 contentLength 边界返回 EOF，避免 ERR_CONTENT_LENGTH_MISMATCH
++     */
++    private class BoundedInputStream(
++        file: File,
++        startPos: Long,
++        private val length: Long
++    ) : InputStream() {
++        private val raf = RandomAccessFile(file, "r").apply {
++            if (startPos > 0) seek(startPos)
++        }
++        private var remaining = length
++
++        override fun read(): Int {
++            if (remaining <= 0) return -1
++            val b = raf.read()
++            if (b != -1) remaining--
++            return b
++        }
++
++        override fun read(b: ByteArray, off: Int, len: Int): Int {
++            if (remaining <= 0) return -1
++            val toRead = Math.min(len.toLong(), remaining).toInt()
++            val bytesRead = raf.read(b, off, toRead)
++            if (bytesRead > 0) {
++                remaining -= bytesRead
++            }
++            return bytesRead
++        }
++
++        override fun available(): Int {
++            return Math.min(remaining, Int.MAX_VALUE.toLong()).toInt()
++        }
++
++        override fun close() {
++            try {
++                raf.close()
++            } catch (e: Exception) {
++                // ignore
++            }
++        }
++    }
++
++    /**
++     * 判断 MIME 是否为文本类（仅文本类需传入 UTF-8 编码，二进制媒体传入 UTF-8 会破坏解码器）
++     */
++    private fun isTextMime(mime: String): Boolean {
++        return mime.startsWith("text/") || mime.contains("json") || mime.contains("javascript")
++    }
++
++    /**
++     * 处理视频/大音频的 HTTP 206 Range 请求，保证流式即时播放
++     */
++    private fun handleRangeRequest(file: File, mimeType: String, rangeHeader: String): WebResourceResponse {
++        val fileLength = file.length()
++        var rangeStart: Long = 0
++        var rangeEnd: Long = fileLength - 1
++
++        try {
++            if (rangeHeader.startsWith("bytes=")) {
++                val rangeValue = rangeHeader.substring(6)
++                val parts = rangeValue.split("-")
++                if (parts.isNotEmpty() && parts[0].isNotEmpty()) {
++                    rangeStart = parts[0].toLong()
++                }
++                if (parts.size > 1 && parts[1].isNotEmpty()) {
++                    rangeEnd = parts[1].toLong()
++                }
++            }
++        } catch (e: Exception) {
++            rangeStart = 0
++            rangeEnd = fileLength - 1
++        }
++
++        if (rangeEnd >= fileLength) rangeEnd = fileLength - 1
++        val contentLength = Math.max(0, rangeEnd - rangeStart + 1)
++
++        val boundedStream = BoundedInputStream(file, rangeStart, contentLength)
++
++        val headers = mutableMapOf(
++            "Access-Control-Allow-Origin" to "*",
++            "Accept-Ranges" to "bytes",
++            "Content-Range" to "bytes $rangeStart-$rangeEnd/$fileLength",
++            "Content-Length" to contentLength.toString(),
++            "Cache-Control" to "no-cache"
++        )
++        val encoding = if (isTextMime(mimeType)) "UTF-8" else null
++        return WebResourceResponse(mimeType, encoding, 206, "Partial Content", headers, boundedStream)
++    }
++
++    /**
++     * 获取文件精准 MIME 类型
++     */
++    private fun getMimeType(fileName: String): String {
++        val ext = fileName.substringAfterLast('.', "").lowercase()
++        return when (ext) {
++            "webp" -> "image/webp"
++            "png" -> "image/png"
++            "jpg", "jpeg" -> "image/jpeg"
++            "mp4" -> "video/mp4"
++            "wav" -> "audio/wav"
++            "mp3" -> "audio/mpeg"
++            "ogg" -> "audio/ogg"
++            "txt" -> "text/plain; charset=utf-8"
++            "json" -> "application/json"
++            "css" -> "text/css"
++            "js" -> "text/javascript"
++            "svg" -> "image/svg+xml"
++            "woff", "woff2" -> "font/woff2"
++            "ttf" -> "font/ttf"
++            else -> "application/octet-stream"
++        }
++    }
++
++    /**
++     * 原生 Android 桥接：方向翻转联动与外部资源状态
++     */
++    inner class AndroidBridge {
++        @JavascriptInterface
++        fun getStartupOpeningResult(): String = openingResult
++
++        @JavascriptInterface
++        fun getToolbarInsets(): String = toolbarInsets
++
++        @JavascriptInterface
++        fun isAppInForeground(): Boolean = appInForeground
++
++        @JavascriptInterface
++        fun setOrientation(orientation: String) {
++            runOnUiThread {
++                if (orientation.equals("portrait", ignoreCase = true)) {
++                    requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
++                    Log.i(TAG, "已联动切换为竖屏 (SENSOR_PORTRAIT)")
++                } else {
++                    requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
++                    Log.i(TAG, "已联动切换为横屏 (SENSOR_LANDSCAPE)")
++                }
++            }
++        }
++
++        @JavascriptInterface
++        fun openResourcePicker() {
++            runOnUiThread {
++                openFolderPicker()
++            }
++        }
++
++        @JavascriptInterface
++        fun openPatchPicker() {
++            runOnUiThread {
++                this@MainActivity.openPatchPicker()
++            }
++        }
++
++        @JavascriptInterface
++        fun getExternalStoragePath(): String {
++            return activeGameDir?.absolutePath ?: getExternalFilesDir(null)?.absolutePath ?: ""
++        }
++
++        @JavascriptInterface
++        fun isExternalAssetsReady(): Boolean {
++            val dir = activeGameDir ?: resolveActiveGameDir()
++            return dir != null && isValidGameDir(dir)
++        }
+     }
+ 
+-    //获取 blob 数据
++    // 获取 blob 数据
+     private fun getBlobData(url: String) {
+         try {
+             val script = "javascript: (() => {" +
+@@ -127,7 +446,6 @@ class MainActivity : AppCompatActivity() {
+                     "fileReaderInstance.readAsDataURL(blobResponse);" +
+                     "fileReaderInstance.onloadend = () => {" +
+                     "const base64data = fileReaderInstance.result.replace(/data:/,'').split(';base64,');" +
+-                    //当 mime 为 application/json 时将存档数据传递到 getSaveData()
+                     "if( base64data[0] === 'application/json') Export.getSaveData(base64data[1]);" +
+                     "}" +
+                     "}" +
+@@ -144,7 +462,6 @@ class MainActivity : AppCompatActivity() {
+     }
+ 
+     inner class ExportInterface {
+-        //获取存档数据
+         @JavascriptInterface
+         fun getSaveData(data: String) {
+             saveData = String(Base64.decode(data, Base64.DEFAULT))
+@@ -152,7 +469,6 @@ class MainActivity : AppCompatActivity() {
+         }
+     }
+ 
+-    //打开存档保存界面
+     private fun createSave() {
+         val saveName = getString(R.string.app_name) + " - save.json"
+         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+@@ -163,7 +479,6 @@ class MainActivity : AppCompatActivity() {
+         startActivityForResult(intent, FILECREATE_REQUEST_CODE)
+     }
+ 
+-    //写入存档数据
+     private fun saveFile(intent: Intent?) {
+         try {
+             val uri = intent?.data ?: return
+@@ -179,7 +494,6 @@ class MainActivity : AppCompatActivity() {
+         }
+     }
+ 
+-    //打开存档选择界面
+     private fun chooseFile(filePathCallback: ValueCallback<Array<Uri>>): Boolean {
+         saveLoadPath = filePathCallback
+         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+@@ -194,15 +508,55 @@ class MainActivity : AppCompatActivity() {
+         super.onActivityResult(requestCode, resultCode, intent)
+         if (resultCode == Activity.RESULT_OK) {
+             intent ?: return
+-            //requestCode 为 FILECREATE_REQUEST_CODE 时向 saveFile() 传递 intent
+             if (requestCode == FILECREATE_REQUEST_CODE) saveFile(intent)
+-            //requestCode 为 FILECHOOSER_REQUEST_CODE 时向 WebView 传递 intent
+             if (requestCode == FILECHOOSER_REQUEST_CODE) {
+                 saveLoadPath!!.onReceiveValue(
+                     WebChromeClient.FileChooserParams.parseResult(resultCode, intent)
+                 )
+                 saveLoadPath = null
+             }
++            if (requestCode == FOLDER_PICKER_REQUEST_CODE) {
++                val treeUri = intent.data
++                if (treeUri != null) {
++                    try {
++                        contentResolver.takePersistableUriPermission(
++                            treeUri,
++                            Intent.FLAG_GRANT_READ_URI_PERMISSION
++                        )
++                    } catch (e: Exception) {
++                        Log.w(TAG, "takePersistableUriPermission failed: ${e.message}")
++                    }
++                    handleSelectedFolder(treeUri)
++                }
++            }
++            if (requestCode == ZIP_PICKER_REQUEST_CODE) {
++                val zipUri = intent.data
++                if (zipUri != null) {
++                    try {
++                        contentResolver.takePersistableUriPermission(
++                            zipUri,
++                            Intent.FLAG_GRANT_READ_URI_PERMISSION
++                        )
++                    } catch (e: Exception) {
++                        Log.w(TAG, "takePersistableUriPermission failed: ${e.message}")
++                    }
++                    extractZipAndApply(zipUri)
++                }
++            }
++            if (requestCode == PATCH_PICKER_REQUEST_CODE) {
++                val patchUri = intent.data
++                if (patchUri != null) {
++                    try {
++                        contentResolver.takePersistableUriPermission(
++                            patchUri,
++                            Intent.FLAG_GRANT_READ_URI_PERMISSION
++                        )
++                    } catch (e: Exception) {
++                        Log.w(TAG, "takePersistableUriPermission failed: ${e.message}")
++                    }
++                    extractPatchZipAndApply(patchUri)
++                }
++            }
+         }
+ 
+         if (resultCode == Activity.RESULT_CANCELED) {
+@@ -212,20 +566,38 @@ class MainActivity : AppCompatActivity() {
+                 saveLoadPath = null
+                 return
+             }
+-        } else return
++            if (requestCode == FOLDER_PICKER_REQUEST_CODE || requestCode == ZIP_PICKER_REQUEST_CODE) {
++                if (activeGameDir == null) {
++                    showMissingResourceDialog()
++                }
++            }
++        }
++    }
++
++    override fun onRequestPermissionsResult(
++        requestCode: Int,
++        permissions: Array<out String>,
++        grantResults: IntArray
++    ) {
++        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
++        if (requestCode == PERMISSION_REQUEST_CODE) {
++            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
++                val pending = pendingFolderToApply
++                if (pending != null) {
++                    applyGameDirectory(pending)
++                    pendingFolderToApply = null
++                }
++            } else {
++                Toast.makeText(this, "未授予读取权限，无法加载外部资源", Toast.LENGTH_LONG).show()
++                if (activeGameDir == null) showMissingResourceDialog()
++            }
++        }
+     }
+ 
+-    //游戏后台暂停
+     override fun onPause() {
+-        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+-        audioManager?.requestAudioFocus(
+-            null,
+-            AudioManager.STREAM_MUSIC,
+-            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+-        )
+-//        val pauseMediaScript =
+-//            "document.querySelectorAll('video, audio').forEach(mediaElement => mediaElement.pause())"
+-//        webView.evaluateJavascript(pauseMediaScript, null)
++        appInForeground = false
++        openingPlayer?.pauseOpening()
++        webView.evaluateJavascript("window.webgalSetAppForeground && window.webgalSetAppForeground(false)", null)
+         webView.run {
+             pauseTimers()
+             onPause()
+@@ -233,41 +605,600 @@ class MainActivity : AppCompatActivity() {
+         super.onPause()
+     }
+ 
+-    //游戏从后台恢复
+     override fun onResume() {
+-        audioManager?.abandonAudioFocus(null)
+-//        val resumeMediaScript =
+-//            "document.querySelectorAll('video, audio').forEach(mediaElement => {" +
+-//                    "if((!mediaElement.loop && !mediaElement.ended) || mediaElement.loop) {" +
+-//                    "if(mediaElement.readyState >= 2) {" +
+-//                    "mediaElement.play()" +
+-//                    "}" +
+-//                    "}" +
+-//                    "})"
+-//        webView.evaluateJavascript(resumeMediaScript, null)
++        appInForeground = true
+         webView.run {
+             resumeTimers()
+             onResume()
+         }
+         super.onResume()
++        openingPlayer?.resumeOpening()
++        webView.evaluateJavascript("window.webgalSetAppForeground && window.webgalSetAppForeground(true)", null)
++
++        // 检查是否有等待赋权后挂载的目录
++        val pending = pendingFolderToApply
++        if (pending != null && hasStoragePermission()) {
++            applyGameDirectory(pending)
++            pendingFolderToApply = null
++        } else if (activeGameDir == null) {
++            val found = resolveActiveGameDir()
++            if (found != null) {
++                activeGameDir = found
++                Toast.makeText(this, "已挂载资源包: ${found.absolutePath}", Toast.LENGTH_SHORT).show()
++                loadGamePage()
++            }
++        }
++    }
++
++    override fun onDestroy() {
++        openingPlayer?.close()
++        openingPlayer = null
++        super.onDestroy()
++    }
++
++    /**
++     * 校验目录是否包含有效素材（以 flowchart.json、manga、config.txt、scene 为特征标识）
++     */
++    private fun isValidGameDir(dir: File?): Boolean {
++        if (dir == null || !dir.exists() || !dir.isDirectory) return false
++        return File(dir, "flowchart.json").exists() ||
++                File(dir, "manga").exists() ||
++                File(dir, "config.txt").exists() ||
++                File(dir, "scene").exists()
++    }
++
++    /**
++     * 从选定目录或其子目录中解析真实 game 文件夹
++     */
++    private fun resolveGameDirFromFolder(folder: File?): File? {
++        if (folder == null || !folder.exists()) return null
++        if (isValidGameDir(folder)) return folder
++        val subGame = File(folder, "game")
++        if (isValidGameDir(subGame)) return subGame
++        return null
++    }
++
++    /**
++     * 解析生效的资源目录：
++     * 1. 优先读取持久化配置 (custom_game_path)
++     * 2. 其次默认免权限私有沙盒 (Android/data/.../files/game)
++     * 3. 再次自动探测常见公共目录 (Download/game, IS_game, Documents/game 等)
++     */
++    private fun resolveActiveGameDir(): File? {
++        val prefs = getSharedPreferences("webgal_pref", Context.MODE_PRIVATE)
++        val savedPath = prefs.getString("custom_game_path", null)
++        if (!savedPath.isNullOrEmpty()) {
++            val resolved = resolveGameDirFromFolder(File(savedPath))
++            if (resolved != null) return resolved
++        }
++
++        // 默认免权限私有沙盒
++        val extFilesDir = getExternalFilesDir(null)
++        val p1 = File(extFilesDir, "game")
++        if (isValidGameDir(p1)) return p1
++        val p2 = File(extFilesDir, "webgal/game")
++        if (isValidGameDir(p2)) return p2
++
++        // 若具备读取权限，自动探测手机常见目录
++        if (hasStoragePermission()) {
++            try {
++                val extStorage = Environment.getExternalStorageDirectory()
++                val candidates = listOf(
++                    File(extStorage, "IS_game"),
++                    File(extStorage, "game"),
++                    File(extStorage, "Download/IS_game"),
++                    File(extStorage, "Download/game"),
++                    File(extStorage, "Documents/IS_game"),
++                    File(extStorage, "Documents/game")
++                )
++                for (cand in candidates) {
++                    val resolved = resolveGameDirFromFolder(cand)
++                    if (resolved != null) {
++                        prefs.edit().putString("custom_game_path", resolved.absolutePath).apply()
++                        Log.i(TAG, "自动探测并绑定资源目录: ${resolved.absolutePath}")
++                        return resolved
++                    }
++                }
++            } catch (e: Exception) {
++                Log.w(TAG, "自动扫描外部目录失败: ${e.message}")
++            }
++        }
++        return null
++    }
++
++    /**
++     * 判断是否具有外部存储读取权限
++     */
++    private fun hasStoragePermission(): Boolean {
++        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
++            Environment.isExternalStorageManager()
++        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
++            checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
++        } else {
++            true
++        }
++    }
++
++    /**
++     * 请求存储权限后挂载目录
++     */
++    private fun requestStoragePermissionAndApply(folder: File) {
++        if (hasStoragePermission()) {
++            applyGameDirectory(folder)
++            return
++        }
++
++        pendingFolderToApply = folder
++
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
++            AlertDialog.Builder(this)
++                .setTitle("需要文件访问权限")
++                .setMessage("您选择的资源位于自定义外部目录：\n${folder.absolutePath}\n\nAndroid 系统要求授予「所有文件访问权限」才能流式读取 6.8GB 高清素材。\n点击【去开启】后，请在系统设置中开启权限。")
++                .setPositiveButton("去开启") { _, _ ->
++                    try {
++                        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
++                            data = Uri.parse("package:$packageName")
++                        }
++                        startActivity(intent)
++                    } catch (e: Exception) {
++                        val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
++                        startActivity(intent)
++                    }
++                }
++                .setNegativeButton("取消") { _, _ ->
++                    pendingFolderToApply = null
++                }
++                .show()
++        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
++            requestPermissions(
++                arrayOf(
++                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
++                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
++                ),
++                PERMISSION_REQUEST_CODE
++            )
++        }
++    }
++
++    /**
++     * 绑定并持久化生效的资源目录
++     */
++    private fun applyGameDirectory(folder: File) {
++        val resolvedGameDir = resolveGameDirFromFolder(folder)
++        if (resolvedGameDir != null) {
++            getSharedPreferences("webgal_pref", Context.MODE_PRIVATE)
++                .edit()
++                .putString("custom_game_path", resolvedGameDir.absolutePath)
++                .apply()
++            activeGameDir = resolvedGameDir
++            Log.i(TAG, "已成功绑定并持久化资源目录: ${resolvedGameDir.absolutePath}")
++            Toast.makeText(this, "已挂载资源目录:\n${resolvedGameDir.absolutePath}", Toast.LENGTH_LONG).show()
++            loadGamePage()
++        } else {
++            AlertDialog.Builder(this)
++                .setTitle("未找到有效素材")
++                .setMessage("所选文件夹：\n${folder.absolutePath}\n\n内部未找到游戏核心资源（未检测到 flowchart.json / manga / config.txt）。\n请确保选择的是包含这些文件或包含 game 文件夹的目录。")
++                .setPositiveButton("重新选择") { _, _ -> openFolderPicker() }
++                .setNegativeButton("取消", null)
++                .show()
++        }
++    }
++
++    /**
++     * 启动系统文件夹选择器 (ACTION_OPEN_DOCUMENT_TREE)
++     */
++    fun openFolderPicker() {
++        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
++            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
++        }
++        try {
++            startActivityForResult(intent, FOLDER_PICKER_REQUEST_CODE)
++        } catch (e: Exception) {
++            Toast.makeText(this, "无法启动文件夹选择器: ${e.message}", Toast.LENGTH_LONG).show()
++        }
++    }
++
++    /**
++     * 从 DocumentTree URI 反解 POSIX 文件路径
++     */
++    private fun getPathFromTreeUri(uri: Uri): String? {
++        return try {
++            val docId = DocumentsContract.getTreeDocumentId(uri) ?: return null
++            val split = docId.split(":")
++            if (split.size < 2) return null
++            val type = split[0]
++            val relativePath = split[1]
++            if ("primary".equals(type, ignoreCase = true)) {
++                "${Environment.getExternalStorageDirectory().absolutePath}/$relativePath"
++            } else {
++                "/storage/$type/$relativePath"
++            }
++        } catch (e: Exception) {
++            Log.e(TAG, "解析 URI 异常: $uri", e)
++            null
++        }
++    }
++
++    private fun handleSelectedFolder(treeUri: Uri) {
++        val posixPath = getPathFromTreeUri(treeUri)
++        if (posixPath != null) {
++            val folder = File(posixPath)
++            requestStoragePermissionAndApply(folder)
++        } else {
++            Toast.makeText(this, "未能解析所选目录路径，请重试", Toast.LENGTH_LONG).show()
++        }
++    }
++
++    /**
++     * 启动系统文件选择器，选取 game.zip 压缩包
++     */
++    fun openZipPicker() {
++        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
++            addCategory(Intent.CATEGORY_OPENABLE)
++            type = "*/*"
++            putExtra(
++                Intent.EXTRA_MIME_TYPES,
++                arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")
++            )
++        }
++        try {
++            startActivityForResult(intent, ZIP_PICKER_REQUEST_CODE)
++        } catch (e: Exception) {
++            Toast.makeText(this, "无法启动文件选择器: ${e.message}", Toast.LENGTH_LONG).show()
++        }
++    }
++
++    /**
++     * 自动嗅探外部公共目录中是否存在 game.zip
++     */
++    private fun detectGameZipFile(): File? {
++        if (!hasStoragePermission()) return null
++        try {
++            val extStorage = Environment.getExternalStorageDirectory()
++            val candidates = listOf(
++                File(extStorage, "game.zip"),
++                File(extStorage, "Download/game.zip"),
++                File(extStorage, "IS_game/game.zip"),
++                File(extStorage, "Documents/game.zip")
++            )
++            for (f in candidates) {
++                if (f.exists() && f.isFile && f.length() > 1024 * 1024) {
++                    return f
++                }
++            }
++        } catch (e: Exception) {
++            Log.w(TAG, "检测 zip 失败: ${e.message}")
++        }
++        return null
++    }
++
++    /**
++     * 自动检测并应用增量视频更新补丁包 (game_video_faststart_update.zip)
++     */
++    private fun checkAndApplyVideoPatch() {
++        val gameDir = activeGameDir ?: return
++        try {
++            val extStorage = Environment.getExternalStorageDirectory()
++            val candidates = listOf(
++                File(extStorage, "game_video_faststart_update.zip"),
++                File(extStorage, "Download/game_video_faststart_update.zip"),
++                File(extStorage, "IS_game/game_video_faststart_update.zip"),
++                File(extStorage, "video_patch.zip"),
++                File(extStorage, "Download/video_patch.zip")
++            )
++            val patchFile = candidates.firstOrNull { it.exists() && it.isFile }
++            if (patchFile != null) {
++                val sp = getSharedPreferences("webgal_pref", Context.MODE_PRIVATE)
++                val appliedKey = "patch_applied_${patchFile.name}_${patchFile.length()}"
++                if (!sp.getBoolean(appliedKey, false)) {
++                    AlertDialog.Builder(this)
++                        .setTitle("🎬 检测到视频更新补丁")
++                        .setMessage("在以下位置发现片头/结尾视频更新补丁：\n${patchFile.absolutePath}\n\n是否立即一键应用更新？（约 1 秒完成覆盖）")
++                        .setPositiveButton("一键更新") { _, _ ->
++                            applyVideoPatch(patchFile, gameDir, appliedKey)
++                        }
++                        .setNegativeButton("稍后再说", null)
++                        .show()
++                }
++            }
++        } catch (e: Exception) {
++            Log.w(TAG, "检查视频补丁失败: ${e.message}")
++        }
++    }
++
++    private fun applyVideoPatch(patchZip: File, targetGameDir: File, appliedKey: String) {
++        val targetVideoDir = File(targetGameDir, "video").apply { mkdirs() }
++        Thread {
++            try {
++                ZipInputStream(BufferedInputStream(FileInputStream(patchZip))).use { zipIn ->
++                    var entry = zipIn.nextEntry
++                    val buffer = ByteArray(256 * 1024)
++                    while (entry != null) {
++                        val name = entry.name.substringAfterLast('/')
++                        if (name.endsWith(".mp4", ignoreCase = true)) {
++                            val outFile = File(targetVideoDir, name)
++                            FileOutputStream(outFile).use { fos ->
++                                var len: Int
++                                while (zipIn.read(buffer).also { len = it } != -1) {
++                                    fos.write(buffer, 0, len)
++                                }
++                            }
++                        }
++                        zipIn.closeEntry()
++                        entry = zipIn.nextEntry
++                    }
++                }
++                getSharedPreferences("webgal_pref", Context.MODE_PRIVATE)
++                    .edit()
++                    .putBoolean(appliedKey, true)
++                    .apply()
++                runOnUiThread {
++                    Toast.makeText(this, "✅ 视频补丁更新成功！", Toast.LENGTH_SHORT).show()
++                    webView.reload()
++                }
++            } catch (e: Exception) {
++                Log.e(TAG, "应用视频补丁异常", e)
++                runOnUiThread {
++                    Toast.makeText(this, "更新补丁失败: ${e.message}", Toast.LENGTH_LONG).show()
++                }
++            }
++        }.start()
++    }
++
++    fun openPatchPicker() {
++        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
++            addCategory(Intent.CATEGORY_OPENABLE)
++            type = "*/*"
++            putExtra(
++                Intent.EXTRA_MIME_TYPES,
++                arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")
++            )
++        }
++        try {
++            startActivityForResult(intent, PATCH_PICKER_REQUEST_CODE)
++        } catch (e: Exception) {
++            Toast.makeText(this, "无法启动文件选择器: ${e.message}", Toast.LENGTH_LONG).show()
++        }
++    }
++
++    private fun extractPatchZipAndApply(patchUri: Uri) {
++        val gameDir = activeGameDir ?: resolveActiveGameDir() ?: run {
++            Toast.makeText(this, "未找到游戏素材目录，请先挂载或解压主资源包", Toast.LENGTH_LONG).show()
++            return
++        }
++        val targetVideoDir = File(gameDir, "video").apply { mkdirs() }
++        val progressDialog = ProgressDialog(this).apply {
++            setTitle("🎬 正在应用视频补丁")
++            setMessage("正在覆盖片头与结尾视频，请稍候…")
++            setCancelable(false)
++            show()
++        }
++        Thread {
++            try {
++                contentResolver.openInputStream(patchUri)?.use { inputStream ->
++                    ZipInputStream(BufferedInputStream(inputStream)).use { zipIn ->
++                        var entry = zipIn.nextEntry
++                        val buffer = ByteArray(256 * 1024)
++                        while (entry != null) {
++                            val name = entry.name.substringAfterLast('/')
++                            if (name.endsWith(".mp4", ignoreCase = true)) {
++                                val outFile = File(targetVideoDir, name)
++                                FileOutputStream(outFile).use { fos ->
++                                    var len: Int
++                                    while (zipIn.read(buffer).also { len = it } != -1) {
++                                        fos.write(buffer, 0, len)
++                                    }
++                                }
++                            }
++                            zipIn.closeEntry()
++                            entry = zipIn.nextEntry
++                        }
++                    }
++                }
++                runOnUiThread {
++                    progressDialog.dismiss()
++                    Toast.makeText(this, "✅ 视频补丁更新成功！", Toast.LENGTH_SHORT).show()
++                    webView.reload()
++                }
++            } catch (e: Exception) {
++                Log.e(TAG, "更新视频补丁失败", e)
++                runOnUiThread {
++                    progressDialog.dismiss()
++                    Toast.makeText(this, "更新视频补丁失败: ${e.message}", Toast.LENGTH_LONG).show()
++                }
++            }
++        }.start()
++    }
++
++    private fun showQuickResourceMenu() {
++        val options = arrayOf("🎬 选取并应用视频更新补丁 (.zip)", "🔄 重新选取/解压主素材包", "⚙ 检查系统文件访问权限")
++        AlertDialog.Builder(this)
++            .setTitle("🎮 游戏素材与维护菜单")
++            .setItems(options) { _, which ->
++                when (which) {
++                    0 -> openPatchPicker()
++                    1 -> showMissingResourceDialog()
++                    2 -> {
++                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
++                            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
++                                data = Uri.parse("package:$packageName")
++                            }
++                            startActivity(intent)
++                        } else {
++                            Toast.makeText(this, "Android 10 及以下无需单独开启所有文件权限", Toast.LENGTH_SHORT).show()
++                        }
++                    }
++                }
++            }
++            .setNegativeButton("取消", null)
++            .show()
++    }
++
++    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
++        if (keyCode == KeyEvent.KEYCODE_BACK) {
++            event?.startTracking()
++            return true
++        }
++        return super.onKeyDown(keyCode, event)
++    }
++
++    override fun onKeyLongPress(keyCode: Int, event: KeyEvent?): Boolean {
++        if (keyCode == KeyEvent.KEYCODE_BACK) {
++            if (openingPlayer != null) return true
++            showQuickResourceMenu()
++            return true
++        }
++        return super.onKeyLongPress(keyCode, event)
++    }
++
++    override fun onBackPressed() {
++        if (openingPlayer != null) return
++        showQuickResourceMenu()
++    }
++
++    private fun showFoundZipPrompt(zipFile: File) {
++        AlertDialog.Builder(this)
++            .setTitle("📦 检测到游戏压缩包")
++            .setMessage("在以下位置发现了资源压缩包：\n${zipFile.absolutePath}\n\n是否立即一键自动解压并进入游戏？（解压耗时约 30~50 秒）")
++            .setCancelable(false)
++            .setPositiveButton("一键解压") { _, _ ->
++                extractZipAndApply(Uri.fromFile(zipFile))
++            }
++            .setNegativeButton("手动选择") { _, _ ->
++                showMissingResourceDialog()
++            }
++            .show()
++    }
++
++    /**
++     * 将用户选择的 game.zip 自动解压至应用私有沙盒 (files/game)
++     */
++    private fun extractZipAndApply(zipUri: Uri) {
++        val progressDialog = ProgressDialog(this).apply {
++            setTitle("📦 正在解压高清游戏素材")
++            setMessage("正在初始化解压，请保持应用处于前台...")
++            setProgressStyle(ProgressDialog.STYLE_HORIZONTAL)
++            isIndeterminate = false
++            max = 16592
++            progress = 0
++            setCancelable(false)
++            show()
++        }
++
++        Thread {
++            try {
++                val inputStream = contentResolver.openInputStream(zipUri)
++                    ?: throw IllegalStateException("无法读取选中的压缩包")
++                val zipIn = ZipInputStream(BufferedInputStream(inputStream, 256 * 1024))
++                val targetBase = File(getExternalFilesDir(null), "game")
++                targetBase.mkdirs()
++
++                val buffer = ByteArray(256 * 1024)
++                var count = 0
++                var entry: ZipEntry? = zipIn.nextEntry
++
++                while (entry != null) {
++                    val entryName = entry.name
++                    // 如果 zip 顶层包含 game/...，去除该前缀平铺在 targetBase 下
++                    val normalizedName = if (entryName.startsWith("game/")) {
++                        entryName.substring(5)
++                    } else if (entryName.startsWith("game\\")) {
++                        entryName.substring(5)
++                    } else {
++                        entryName
++                    }
++
++                    if (normalizedName.isNotEmpty()) {
++                        val outFile = File(targetBase, normalizedName)
++                        if (!outFile.canonicalPath.startsWith(targetBase.canonicalPath)) {
++                            throw SecurityException("非法的压缩包路径: $entryName")
++                        }
++
++                        if (entry.isDirectory) {
++                            outFile.mkdirs()
++                        } else {
++                            outFile.parentFile?.mkdirs()
++                            FileOutputStream(outFile).use { fos ->
++                                var len: Int
++                                while (zipIn.read(buffer).also { len = it } != -1) {
++                                    fos.write(buffer, 0, len)
++                                }
++                            }
++                        }
++                    }
++                    zipIn.closeEntry()
++                    count++
++                    if (count % 80 == 0 || count == 16592) {
++                        val currentCount = count
++                        val currentName = entry.name
++                        runOnUiThread {
++                            progressDialog.progress = currentCount
++                            progressDialog.setMessage("已解压 $currentCount / 16592 文件...\n${currentName.substringAfterLast('/')}")
++                        }
++                    }
++                    entry = zipIn.nextEntry
++                }
++                zipIn.close()
++                inputStream.close()
++
++                runOnUiThread {
++                    progressDialog.dismiss()
++                    Toast.makeText(this@MainActivity, "解压成功！正在加载游戏...", Toast.LENGTH_SHORT).show()
++                    applyGameDirectory(targetBase)
++                }
++            } catch (e: Exception) {
++                Log.e(TAG, "解压异常", e)
++                runOnUiThread {
++                    progressDialog.dismiss()
++                    AlertDialog.Builder(this@MainActivity)
++                        .setTitle("解压中断")
++                        .setMessage("解压失败: ${e.message}\n请检查手机内部存储空间是否充足（需预留至少 8GB 空间）。")
++                        .setPositiveButton("重试") { _, _ -> openZipPicker() }
++                        .setNegativeButton("取消", null)
++                        .show()
++                }
++            }
++        }.start()
++    }
++
++    /**
++     * 未检测到资源时的引导弹窗
++     */
++    private fun showMissingResourceDialog() {
++        AlertDialog.Builder(this)
++            .setTitle("🎮 请指定《I's Pure》资源")
++            .setMessage("未检测到 6.8GB 高清游戏与漫画素材。\n\n推荐方式：直接选择上传到手机的 game.zip 压缩包一键自动解压；或选择已在电脑/手机解压好的 game 文件夹。")
++            .setCancelable(false)
++            .setPositiveButton("📦 选择 game.zip 自动解压") { _, _ ->
++                openZipPicker()
++            }
++            .setNeutralButton("📁 选择已解压目录") { _, _ ->
++                openFolderPicker()
++            }
++            .setNegativeButton("默认路径说明") { _, _ ->
++                val extFilesDir = getExternalFilesDir(null)
++                val defaultPath = File(extFilesDir, "game").absolutePath
++                AlertDialog.Builder(this)
++                    .setTitle("默认免权限路径")
++                    .setMessage("默认免权限沙盒路径为：\n$defaultPath\n\n将 game 文件夹放入此路径可直接运行，无需开启额外权限。")
++                    .setPositiveButton("我知道了") { _, _ -> showMissingResourceDialog() }
++                    .show()
++            }
++            .show()
+     }
+ 
+-    //全屏
+     private fun fullscreen() {
+-        //android R 以上全屏
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+-            window.decorView.windowInsetsController!!.hide(
+-                WindowInsets.Type.statusBars()
+-                        or WindowInsets.Type.navigationBars()
++            window.decorView.windowInsetsController?.hide(
++                WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars()
+             )
+         } else {
+-            //android R 以下全屏
++            @Suppress("DEPRECATION")
+             window.decorView.systemUiVisibility = (
+-                    View.SYSTEM_UI_FLAG_IMMERSIVE
++                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                             or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                             or View.SYSTEM_UI_FLAG_FULLSCREEN
+                     )
+         }
+     }
+ }
+-
+diff --git a/app/src/main/java/com/openwebgal/demo/StartupOpening.kt b/app/src/main/java/com/openwebgal/demo/StartupOpening.kt
+new file mode 100644
+index 0000000..4daf81c
+--- /dev/null
++++ b/app/src/main/java/com/openwebgal/demo/StartupOpening.kt
+@@ -0,0 +1,281 @@
++package com.openwebgal.demo
++
++import android.app.AlertDialog
++import android.content.Context
++import android.graphics.Color
++import android.media.MediaPlayer
++import android.os.SystemClock
++import android.util.Log
++import android.view.Gravity
++import android.view.View
++import android.view.accessibility.AccessibilityNodeInfo
++import android.widget.FrameLayout
++import android.widget.LinearLayout
++import android.widget.TextView
++import android.widget.VideoView
++import java.io.File
++
++/** Owns cold-start playback before the WebView loads the title page. */
++class StartupOpening(
++    context: Context,
++    private val finished: (rendered: Boolean, interrupted: Boolean) -> Unit,
++) : FrameLayout(context) {
++    private val status = TextView(context)
++    private val actions = LinearLayout(context)
++    private val skip = action(R.string.opening_skip)
++    private val retry = action(R.string.opening_retry)
++    private var video: VideoView? = null
++    private var source: File? = null
++    private var confirmSkip: AlertDialog? = null
++    private var frameRendered = false
++    private var everRendered = false
++    private var durationMs = 0
++    private var videoSize = ""
++    private var furthestMs = 0
++    private var resumeAtMs = 0
++    private var elapsedForegroundMs = 0L
++    private var foregroundStartedAt: Long? = null
++    private var lastAdvancedAt = 0L
++    private var foreground = true
++    private var closed = false
++    private var failed = false
++
++    private val startupTimeout = Runnable { playbackFailed("first frame timed out") }
++    private val progressCheck = object : Runnable {
++        override fun run() {
++            val player = video ?: return
++            if (closed || !foreground) return
++            val now = SystemClock.elapsedRealtime()
++            val position = player.currentPosition
++            if (position > furthestMs) {
++                furthestMs = position
++                lastAdvancedAt = now
++            }
++            if (furthestMs >= MIN_SKIP_MS && skip.visibility != View.VISIBLE) {
++                skip.visibility = View.VISIBLE
++            }
++            if (now - lastAdvancedAt >= STALL_TIMEOUT_MS) {
++                playbackFailed("stalled at ${furthestMs}ms")
++            } else {
++                postDelayed(this, PROGRESS_INTERVAL_MS)
++            }
++        }
++    }
++
++    init {
++        setBackgroundColor(Color.BLACK)
++        status.setTextColor(Color.WHITE)
++        status.setText(R.string.opening_loading)
++        addView(status, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
++        skip.visibility = View.GONE
++        retry.visibility = View.GONE
++        skip.accessibilityDelegate = object : View.AccessibilityDelegate() {
++            override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
++                super.onInitializeAccessibilityNodeInfo(host, info)
++                info.className = "android.widget.Button"
++                // Keep the action meaningful to screen readers without exposing it as an ad-skip label.
++                info.text = null
++                info.contentDescription = resources.getText(R.string.opening_enter_title)
++            }
++        }
++        skip.setOnClickListener {
++            if (failed) {
++                complete("confirmed-error-exit")
++            } else if (frameRendered && furthestMs >= MIN_SKIP_MS && confirmSkip == null) {
++                confirmSkip = AlertDialog.Builder(context)
++                    .setTitle(R.string.opening_skip_confirm)
++                    .setNegativeButton(R.string.opening_keep_playing, null)
++                    .setPositiveButton(R.string.opening_enter_title) { _, _ -> complete("confirmed-skip") }
++                    .create().also { dialog ->
++                        dialog.setOnDismissListener { confirmSkip = null }
++                        dialog.show()
++                    }
++            }
++        }
++        retry.setOnClickListener { startAttempt() }
++        actions.addView(retry)
++        actions.addView(skip)
++        addView(actions, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END))
++        setSafeMargins(0, 0, 0)
++    }
++
++    fun play(file: File?) {
++        source = file
++        startAttempt()
++    }
++
++    private fun startAttempt() {
++        if (closed) return
++        releaseVideo()
++        frameRendered = false
++        durationMs = 0
++        videoSize = ""
++        furthestMs = 0
++        resumeAtMs = 0
++        elapsedForegroundMs = 0
++        foregroundStartedAt = null
++        failed = false
++        skip.setText(R.string.opening_skip)
++        skip.visibility = View.GONE
++        retry.visibility = View.GONE
++        status.setText(R.string.opening_loading)
++        status.visibility = View.VISIBLE
++
++        val file = source
++        if (file == null) {
++            playbackFailed("bundled video could not be opened")
++            return
++        }
++
++        val player = VideoView(context).apply { isFocusable = false }
++        video = player
++        addView(player, 0, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER))
++        player.setOnPreparedListener { media ->
++            if (video !== player) return@setOnPreparedListener
++            durationMs = media.duration
++            videoSize = "${media.videoWidth}x${media.videoHeight}"
++            if (durationMs !in 90_000..100_000) {
++                // Leave VideoView's prepared callback before releasing its MediaPlayer.
++                post { if (video === player) playbackFailed("invalid duration ${durationMs}ms") }
++            } else {
++                if (resumeAtMs > 0) player.seekTo(resumeAtMs)
++                if (foreground) player.start()
++            }
++        }
++        player.setOnInfoListener { _, what, _ ->
++            if (video !== player || what != MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
++                false
++            } else {
++                if (!frameRendered) {
++                    frameRendered = true
++                    everRendered = true
++                    status.visibility = View.GONE
++                    removeCallbacks(startupTimeout)
++                    Log.i(TAG, "First opening frame rendered: ${file.name}, $videoSize, duration=${durationMs}ms")
++                }
++                watchProgress()
++                true
++            }
++        }
++        player.setOnCompletionListener {
++            if (video !== player) return@setOnCompletionListener
++            val elapsed = foregroundPlaybackTime()
++            // Some devices report completion before any meaningful progress. Ignore that as an EOF.
++            if (frameRendered && furthestMs >= durationMs - END_POSITION_TOLERANCE_MS &&
++                elapsed >= durationMs - END_TIME_TOLERANCE_MS) {
++                Log.i(TAG, "Opening reached its end: ${furthestMs}/${durationMs}ms")
++                complete("end-of-video")
++            } else {
++                playbackFailed("premature completion at ${furthestMs}/${durationMs}ms after ${elapsed}ms")
++            }
++        }
++        player.setOnErrorListener { _, what, extra ->
++            if (video === player) playbackFailed("decoder error $what/$extra")
++            true
++        }
++        player.setVideoPath(file.path)
++        scheduleStartupTimeout()
++    }
++
++    private fun action(label: Int): TextView {
++        val density = resources.displayMetrics.density
++        return TextView(context).apply {
++            setText(label)
++            setTextColor(0xCCFFFFFF.toInt())
++            textSize = 14f
++            setShadowLayer(5 * density, 0f, density, Color.BLACK)
++            minimumHeight = (48 * density).toInt()
++            val padding = (12 * density).toInt()
++            setPadding(padding, 0, padding, 0)
++            gravity = Gravity.CENTER
++        }
++    }
++
++    fun setSafeMargins(left: Int, right: Int, bottom: Int) {
++        val margin = (12 * resources.displayMetrics.density).toInt()
++        val params = actions.layoutParams as LayoutParams
++        params.leftMargin = left + margin
++        params.rightMargin = right + margin
++        params.bottomMargin = bottom + margin
++        actions.layoutParams = params
++    }
++
++    fun pauseOpening() {
++        foreground = false
++        elapsedForegroundMs = foregroundPlaybackTime()
++        foregroundStartedAt = null
++        removeCallbacks(startupTimeout)
++        removeCallbacks(progressCheck)
++        video?.let {
++            resumeAtMs = it.currentPosition
++            it.pause()
++        }
++    }
++
++    fun resumeOpening() {
++        foreground = true
++        if (closed || failed) return
++        video?.start()
++        if (frameRendered) watchProgress() else scheduleStartupTimeout()
++    }
++
++    private fun foregroundPlaybackTime(): Long =
++        elapsedForegroundMs + (foregroundStartedAt?.let { SystemClock.elapsedRealtime() - it } ?: 0L)
++
++    private fun watchProgress() {
++        if (!foreground || closed || failed) return
++        val now = SystemClock.elapsedRealtime()
++        if (foregroundStartedAt == null) foregroundStartedAt = now
++        lastAdvancedAt = now
++        removeCallbacks(progressCheck)
++        post(progressCheck)
++    }
++
++    private fun scheduleStartupTimeout() {
++        removeCallbacks(startupTimeout)
++        if (foreground && video != null) postDelayed(startupTimeout, STALL_TIMEOUT_MS)
++    }
++
++    private fun playbackFailed(reason: String) {
++        if (closed || failed) return
++        Log.w(TAG, "Opening playback failed: $reason")
++        releaseVideo()
++        failed = true
++        status.setText(R.string.opening_unavailable)
++        status.visibility = View.VISIBLE
++        skip.setText(R.string.opening_enter_title)
++        skip.visibility = View.VISIBLE
++        retry.visibility = if (source == null) View.GONE else View.VISIBLE
++    }
++
++    private fun complete(reason: String) {
++        if (closed) return
++        Log.i(TAG, "Leaving opening: $reason, position=${furthestMs}ms, foreground=${foregroundPlaybackTime()}ms")
++        close()
++        finished(everRendered, failed)
++    }
++
++    private fun releaseVideo() {
++        removeCallbacks(startupTimeout)
++        removeCallbacks(progressCheck)
++        val previous = video ?: return
++        video = null
++        previous.stopPlayback()
++        removeView(previous)
++    }
++
++    fun close() {
++        closed = true
++        confirmSkip?.dismiss()
++        releaseVideo()
++    }
++
++    companion object {
++        private const val TAG = "StartupOpening"
++        private const val MIN_SKIP_MS = 4_000
++        private const val STALL_TIMEOUT_MS = 18_000L
++        private const val PROGRESS_INTERVAL_MS = 250L
++        private const val END_POSITION_TOLERANCE_MS = 2_000
++        private const val END_TIME_TOLERANCE_MS = 3_000L
++    }
++}
+diff --git a/app/src/main/res/drawable-v26/is_pure_launcher.xml b/app/src/main/res/drawable-v26/is_pure_launcher.xml
+new file mode 100644
+index 0000000..e1ccb43
+--- /dev/null
++++ b/app/src/main/res/drawable-v26/is_pure_launcher.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
++    <background android:drawable="@color/is_pure_icon_background" />
++    <foreground android:drawable="@drawable/is_pure_mark" />
++</adaptive-icon>
+diff --git a/app/src/main/res/drawable/is_pure_launcher.xml b/app/src/main/res/drawable/is_pure_launcher.xml
+new file mode 100644
+index 0000000..baac49e
+--- /dev/null
++++ b/app/src/main/res/drawable/is_pure_launcher.xml
+@@ -0,0 +1,11 @@
++<?xml version="1.0" encoding="utf-8"?>
++<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
++    <item>
++        <shape android:shape="rectangle">
++            <solid android:color="@color/is_pure_icon_background" />
++            <corners android:radius="19dp" />
++            <size android:width="108dp" android:height="108dp" />
++        </shape>
++    </item>
++    <item android:drawable="@drawable/is_pure_mark" />
++</layer-list>
+diff --git a/app/src/main/res/values/is_pure_icon.xml b/app/src/main/res/values/is_pure_icon.xml
+new file mode 100644
+index 0000000..6fdc1f5
+--- /dev/null
++++ b/app/src/main/res/values/is_pure_icon.xml
+@@ -0,0 +1,4 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <color name="is_pure_icon_background">#FFFFFF</color>
++</resources>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 91cf48e..93e90ae 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -1,3 +1,3 @@
+ <resources>
+-    <string name="app_name">WebGAL</string>
+-</resources>
+\ No newline at end of file
++    <string name="app_name">I\'s Pure</string>
++</resources>
+diff --git a/app/src/main/res/values/values.xml b/app/src/main/res/values/values.xml
+index c0b499e..0e2aee1 100644
+--- a/app/src/main/res/values/values.xml
++++ b/app/src/main/res/values/values.xml
+@@ -2,4 +2,11 @@
+ <resources>
+     <!--  游戏加载url  -->
+     <string name="load_url">https://appassets.androidplatform.net/assets/webgal/index.html</string>
+-</resources>
+\ No newline at end of file
++    <string name="opening_loading">正在载入片头…</string>
++    <string name="opening_skip">跳过片头</string>
++    <string name="opening_skip_confirm">跳过片头？</string>
++    <string name="opening_keep_playing">继续播放</string>
++    <string name="opening_unavailable">片头播放中断</string>
++    <string name="opening_retry">重试</string>
++    <string name="opening_enter_title">进入标题</string>
++</resources>

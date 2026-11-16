@@ -1,0 +1,33 @@
+const { chromium } = require('playwright');
+
+(async () => {
+  const browser = await chromium.launch({ headless: true, executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', args: ['--mute-audio'] });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto('http://127.0.0.1:4178/', { waitUntil: 'networkidle', timeout: 60000 });
+  await page.waitForTimeout(3000);
+  console.log('TITLE:', await page.title());
+  console.log('BODY:', (await page.locator('body').innerText()).slice(0, 2500));
+  console.log('ERRORS:', JSON.stringify(errors));
+  await page.screenshot({ path: '../验证/样机标题.png' });
+  await page.getByText('PRESS THE SCREEN TO START', { exact: true }).click();
+  await page.waitForTimeout(1500);
+  await page.getByText('简体中文', { exact: true }).first().click();
+  await page.waitForTimeout(1500);
+  await page.getByText('开始游戏', { exact: true }).first().click();
+  await page.waitForTimeout(3000);
+  console.log('GAME:', (await page.locator('body').innerText()).slice(0, 2500));
+  console.log('ERRORS_AFTER_START:', JSON.stringify(errors));
+  await page.screenshot({ path: '../验证/样机正文.png' });
+  await page.getByText('快速存档', { exact: true }).first().click();
+  await page.waitForTimeout(1000);
+  await page.mouse.click(800, 350);
+  await page.waitForTimeout(3000);
+  console.log('AFTER_ADVANCE:', (await page.locator('body').innerText()).slice(0, 250));
+  await page.getByText('快速读档', { exact: true }).first().click();
+  await page.waitForTimeout(3000);
+  console.log('AFTER_LOAD:', (await page.locator('body').innerText()).slice(0, 250));
+  await page.screenshot({ path: '../验证/快速读档.png' });
+  await browser.close();
+})().catch(e => { console.error(e); process.exitCode = 1; });

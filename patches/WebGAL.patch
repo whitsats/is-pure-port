@@ -1,0 +1,4444 @@
+diff --git a/packages/webgal/index.html b/packages/webgal/index.html
+index 1aa340e..ff51bf3 100644
+--- a/packages/webgal/index.html
++++ b/packages/webgal/index.html
+@@ -2,6 +2,7 @@
+ <html lang="zh-Hans">
+   <head>
+     <meta charset="UTF-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+     <link rel="icon" type="image/x-icon" href="/icons/favicon.ico" />
+     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+     <link rel="manifest" href="/manifest.json" />
+@@ -14,6 +15,12 @@
+         width: 100%;
+         height: 100%;
+         overflow: hidden;
++        -webkit-tap-highlight-color: transparent !important;
++      }
++
++      * {
++        -webkit-tap-highlight-color: transparent !important;
++        -webkit-touch-callout: none !important;
+       }
+ 
+       .html-body__effect-background {
+@@ -42,6 +49,33 @@
+         opacity: 0;
+       }
+ 
++      #html-body__viewport-video {
++        position: fixed;
++        inset: 0;
++        z-index: 30;
++        pointer-events: none;
++        overflow: hidden;
++      }
++
++      #html-body__viewport-video video {
++        object-fit: cover;
++      }
++
++      @media (min-aspect-ratio: 20/9) {
++        #html-body__viewport-video video {
++          object-fit: contain;
++        }
++      }
++
++      @media (max-aspect-ratio: 1/1) {
++        #html-body__viewport-video {
++          width: 2560px;
++          height: 1440px;
++        }
++      }
++
++      /* 落地页默认不绘制：等解析阶段读到 config.txt 再决定是否显示，
++         否则开启片头循环的工程会在 fetch 返回前闪一帧落地页。 */
+       .html-body__title-enter {
+         width: 2560px;
+         height: 1440px;
+@@ -50,6 +84,7 @@
+         top: 0;
+         z-index: 14;
+         opacity: 1;
++        display: none;
+         transition: opacity 1.5s;
+       }
+ 
+@@ -155,8 +190,38 @@
+         </div>
+       </div>
+     </div>
++    <script>
++      // 落地页在 CSS 里默认 display:none（不绘制），这里在解析阶段读出 config.txt：
++      // - 有 Opening_video：保持隐藏，把文件名交给 OpeningLoop，首帧直接起片头；
++      // - 没有：把落地页显示回来，其他工程的行为不变（只是比原来晚一次 fetch 的时间）。
++      // 这样“PRESS THE SCREEN TO START”和未套模板样式的标题菜单都不会在片头前闪。
++      (() => {
++        const landing = document.querySelector('.html-body__title-enter');
++        const showLanding = () => {
++          if (landing) landing.style.display = 'block';
++        };
++        fetch('./game/config.txt')
++          .then((response) => (response.ok ? response.text() : ''))
++          .then((text) => {
++            const matched = text.match(/^\s*Opening_video\s*:\s*([^\s;]+)/m);
++            if (!matched) {
++              showLanding();
++              return;
++            }
++            window.__WEBGAL_OPENING_VIDEO__ = matched[1];
++            if (landing) {
++              landing.style.pointerEvents = 'none';
++              landing.style.display = 'none';
++            }
++          })
++          .catch(showLanding);
++      })();
++    </script>
+     <!-- 紧急回避页挂载点 -->
+     <div id="html-body__panic-overlay"></div>
++    <div id="html-body__viewport-video">
++      <div id="html-body__ending-video"></div>
++    </div>
+     <!-- 应用挂载点 -->
+     <div id="root"></div>
+     <script>
+@@ -166,36 +231,82 @@
+         const maxTouchPoints = navigator.maxTouchPoints || 0;
+         const isIOSPhone = /iPhone|iPod/i.test(userAgent);
+         const isIPad = /iPad/i.test(userAgent) || (/Mac/i.test(platform) && maxTouchPoints > 1);
++        const isAndroid = /Android/i.test(userAgent);
++        const isMobile = isIOSPhone || isAndroid || (maxTouchPoints > 0 && /Mobile/i.test(userAgent)) || !!window.AndroidBridge;
+ 
+         window.__WEBGAL_DEVICE_INFO__ = {
+           isIOS: isIOSPhone || isIPad,
+           isIOSPhone,
+           isIPad,
++          isAndroid,
++          isMobile,
++        };
++
++        if (isMobile) {
++          document.documentElement.classList.add('is-mobile-device');
++        }
++      })();
++    </script>
++    <script>
++      (() => {
++        const bridge = window.AndroidBridge;
++        if (!bridge) return;
++
++        window.webgalUpdateToolbarInsets = () => {
++          const insets = bridge.getToolbarInsets?.().split(',').map(Number);
++          if (insets?.length !== 3 || !insets.every(Number.isFinite)) return;
++          ['left', 'right', 'bottom'].forEach((edge, i) => {
++            document.documentElement.style.setProperty('--android-toolbar-' + edge, insets[i] + 'px');
++          });
++        };
++        window.webgalUpdateToolbarInsets();
++
++        let foreground = bridge.isAppInForeground?.() ?? true;
++        const paused = new Map();
++        const isBackground = () => !foreground || document.hidden;
++        const pause = (media) => {
++          if (media.paused || media.ended) return;
++          paused.set(media, media.getAttribute('src'));
++          media.pause();
++        };
++        const syncMedia = () => {
++          if (isBackground()) {
++            document.querySelectorAll('audio, video').forEach(pause);
++          } else {
++            for (const [media, source] of paused) {
++              if (media.isConnected && media.getAttribute('src') === source) {
++                media.play().catch(() => {});
++              }
++            }
++            paused.clear();
++          }
++        };
++        document.addEventListener('visibilitychange', syncMedia);
++        document.addEventListener('play', (event) => {
++          if (isBackground() && event.target instanceof HTMLMediaElement) pause(event.target);
++        }, true);
++        window.webgalSetAppForeground = (next) => {
++          foreground = next;
++          syncMedia();
+         };
+       })();
+     </script>
+     <!-- 在窗口大小改变时进行强制缩放 -->
+     <script>
+       (() => {
+-        const deviceInfo = window.__WEBGAL_DEVICE_INFO__ ?? { isIOS: false };
++        const deviceInfo = window.__WEBGAL_DEVICE_INFO__ ?? { isIOS: false, isMobile: false };
+         const isIOS = deviceInfo.isIOS;
+-        const layoutConfig = isIOS
+-          ? {
+-              bottomInset: 15,
+-              resizeDelay: 500,
+-              viewport:
+-                'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover',
+-              hideEffectBackground: true,
+-            }
+-          : {
+-              bottomInset: 0,
+-              resizeDelay: 0,
+-              viewport: 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no',
+-              hideEffectBackground: false,
+-            };
++        const layoutConfig = {
++          bottomInset: isIOS ? 15 : 0,
++          resizeDelay: isIOS ? 500 : 0,
++          viewport:
++            'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover',
++          hideEffectBackground: isIOS,
++        };
+         const root = document.querySelector('#root');
+         const titleEnter = document.querySelector('.html-body__title-enter');
+         const effectBackground = document.querySelector('.html-body__effect-background');
++        const viewportVideo = document.querySelector('#html-body__viewport-video');
+         let viewportMeta = document.querySelector('meta[name="viewport"]');
+ 
+         const ensureViewportMeta = () => {
+@@ -269,6 +380,9 @@
+           if (effectBackground) {
+             effectBackground.style.transform = effectBackgroundTransform;
+           }
++          if (viewportVideo) {
++            viewportVideo.style.transform = w > h ? '' : transform;
++          }
+           for (const element of elements) {
+             if (element) {
+               element.style.transform = transform;
+@@ -294,8 +408,7 @@
+           styleTag.textContent = `* { font-synthesis: none !important; }`;
+           if (layoutConfig.hideEffectBackground) {
+             styleTag.textContent += `
+-              #ebg,
+-              #ebgOverlay {
++              #ebg:not(.html-body__effect-background--disc-cg) {
+                 display: none !important;
+               }
+             `;
+diff --git a/packages/webgal/is-android-shell.vite.config.ts b/packages/webgal/is-android-shell.vite.config.ts
+new file mode 100644
+index 0000000..ab92e37
+--- /dev/null
++++ b/packages/webgal/is-android-shell.vite.config.ts
+@@ -0,0 +1,13 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  base: './',
++  publicDir: resolve(__dirname, 'public'),
++  build: {
++    outDir: resolve(__dirname, '../../../../../android-is-pure-prototype/app/src/main/assets/webgal'),
++    emptyOutDir: false,
++    chunkSizeWarningLimit: 2000,
++  },
++}));
+diff --git a/packages/webgal/is-auto.vite.config.ts b/packages/webgal/is-auto.vite.config.ts
+new file mode 100644
+index 0000000..fd9d3a9
+--- /dev/null
++++ b/packages/webgal/is-auto.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/自动片段/public'),
++}));
+diff --git a/packages/webgal/is-branch-scan.vite.config.ts b/packages/webgal/is-branch-scan.vite.config.ts
+new file mode 100644
+index 0000000..6877fc8
+--- /dev/null
++++ b/packages/webgal/is-branch-scan.vite.config.ts
+@@ -0,0 +1,27 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++// 分支扫描：每个 worker 用 扫描分支/w<编号>/public 这份场景副本（vocal/background 是目录联接，
++// 指回 新游戏打盘版/public）。扫描只改副本里的 start.txt，不动 4203 的现行样片。
++const worker = process.env.SCAN_WORKER ?? '0';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, `../../../scan/w${worker}/public`),
++  plugins: [{
++    name: 'branch-scan-log-invalid-url',
++    configureServer(server) {
++      server.middlewares.use((request, response, next) => {
++        try {
++          decodeURI(request.url ?? '');
++        } catch {
++          console.error(`[branch-scan] invalid URL: ${request.url}`);
++          response.statusCode = 404;
++          response.end('Malformed non-story animation URL omitted during branch scan');
++          return;
++        }
++        next();
++      });
++    },
++  }],
++}));
+diff --git a/packages/webgal/is-chapter.vite.config.ts b/packages/webgal/is-chapter.vite.config.ts
+new file mode 100644
+index 0000000..50c1281
+--- /dev/null
++++ b/packages/webgal/is-chapter.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/章节标题验证/public'),
++}));
+diff --git a/packages/webgal/is-choice-cn.vite.config.ts b/packages/webgal/is-choice-cn.vite.config.ts
+new file mode 100644
+index 0000000..58f6b11
+--- /dev/null
++++ b/packages/webgal/is-choice-cn.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/选项中文核查/public'),
++}));
+diff --git a/packages/webgal/is-choice-cross.vite.config.ts b/packages/webgal/is-choice-cross.vite.config.ts
+new file mode 100644
+index 0000000..a9c5448
+--- /dev/null
++++ b/packages/webgal/is-choice-cross.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/选项跨剧本流程样片/public'),
++}));
+diff --git a/packages/webgal/is-choice-real.vite.config.ts b/packages/webgal/is-choice-real.vite.config.ts
+new file mode 100644
+index 0000000..2c9f3cf
+--- /dev/null
++++ b/packages/webgal/is-choice-real.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/选项分支真实剧情样片/public'),
++}));
+diff --git a/packages/webgal/is-choice-state.vite.config.ts b/packages/webgal/is-choice-state.vite.config.ts
+new file mode 100644
+index 0000000..787c627
+--- /dev/null
++++ b/packages/webgal/is-choice-state.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/选项跨剧本状态样片/public'),
++}));
+diff --git a/packages/webgal/is-choice.vite.config.ts b/packages/webgal/is-choice.vite.config.ts
+new file mode 100644
+index 0000000..2060f79
+--- /dev/null
++++ b/packages/webgal/is-choice.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/选项核查/public'),
++}));
+diff --git a/packages/webgal/is-dynamic-fifth.vite.config.ts b/packages/webgal/is-dynamic-fifth.vite.config.ts
+new file mode 100644
+index 0000000..47f633a
+--- /dev/null
++++ b/packages/webgal/is-dynamic-fifth.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏动态第五选项/public'),
++}));
+diff --git a/packages/webgal/is-dynamic-fourth.vite.config.ts b/packages/webgal/is-dynamic-fourth.vite.config.ts
+new file mode 100644
+index 0000000..823d7c3
+--- /dev/null
++++ b/packages/webgal/is-dynamic-fourth.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏动态第四选项/public'),
++}));
+diff --git a/packages/webgal/is-dynamic-mac004.vite.config.ts b/packages/webgal/is-dynamic-mac004.vite.config.ts
+new file mode 100644
+index 0000000..487ea7a
+--- /dev/null
++++ b/packages/webgal/is-dynamic-mac004.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏动态MAC004/public'),
++}));
+diff --git a/packages/webgal/is-dynamic-state.vite.config.ts b/packages/webgal/is-dynamic-state.vite.config.ts
+new file mode 100644
+index 0000000..2d3ac05
+--- /dev/null
++++ b/packages/webgal/is-dynamic-state.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏动态状态/public'),
++}));
+diff --git a/packages/webgal/is-firstchoice.vite.config.ts b/packages/webgal/is-firstchoice.vite.config.ts
+new file mode 100644
+index 0000000..994ac6e
+--- /dev/null
++++ b/packages/webgal/is-firstchoice.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏首选项样片/public'),
++}));
+diff --git a/packages/webgal/is-mac006.vite.config.ts b/packages/webgal/is-mac006.vite.config.ts
+new file mode 100644
+index 0000000..2d87acd
+--- /dev/null
++++ b/packages/webgal/is-mac006.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏岸边告白/public'),
++}));
+diff --git a/packages/webgal/is-mac007.vite.config.ts b/packages/webgal/is-mac007.vite.config.ts
+new file mode 100644
+index 0000000..1e9c869
+--- /dev/null
++++ b/packages/webgal/is-mac007.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏岸边告白接续/public'),
++}));
+diff --git a/packages/webgal/is-msgwindow.vite.config.ts b/packages/webgal/is-msgwindow.vite.config.ts
+new file mode 100644
+index 0000000..5727b55
+--- /dev/null
++++ b/packages/webgal/is-msgwindow.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/消息窗样片/public'),
++}));
+diff --git a/packages/webgal/is-newgame.vite.config.ts b/packages/webgal/is-newgame.vite.config.ts
+new file mode 100644
+index 0000000..c2e4717
+--- /dev/null
++++ b/packages/webgal/is-newgame.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/真实新游戏样片/public'),
++}));
+diff --git a/packages/webgal/is-opening-cross.vite.config.ts b/packages/webgal/is-opening-cross.vite.config.ts
+new file mode 100644
+index 0000000..bae285d
+--- /dev/null
++++ b/packages/webgal/is-opening-cross.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/开头样片_跨MAC001/public'),
++}));
+diff --git a/packages/webgal/is-opening.vite.config.ts b/packages/webgal/is-opening.vite.config.ts
+new file mode 100644
+index 0000000..277539f
+--- /dev/null
++++ b/packages/webgal/is-opening.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/开头样片/public'),
++}));
+diff --git a/packages/webgal/is-particle-effect.vite.config.ts b/packages/webgal/is-particle-effect.vite.config.ts
+new file mode 100644
+index 0000000..6768f9b
+--- /dev/null
++++ b/packages/webgal/is-particle-effect.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏特效接续/public'),
++}));
+diff --git a/packages/webgal/is-particle-extension.vite.config.ts b/packages/webgal/is-particle-extension.vite.config.ts
+new file mode 100644
+index 0000000..68eac4c
+--- /dev/null
++++ b/packages/webgal/is-particle-extension.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏特效接续扩展/public'),
++}));
+diff --git a/packages/webgal/is-sample.vite.config.ts b/packages/webgal/is-sample.vite.config.ts
+new file mode 100644
+index 0000000..1b5c303
+--- /dev/null
++++ b/packages/webgal/is-sample.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/样片/public'),
++}));
+diff --git a/packages/webgal/is-story-wiring.vite.config.ts b/packages/webgal/is-story-wiring.vite.config.ts
+new file mode 100644
+index 0000000..059faf3
+--- /dev/null
++++ b/packages/webgal/is-story-wiring.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏批量接线/public'),
++}));
+diff --git a/packages/webgal/is-threechoices.vite.config.ts b/packages/webgal/is-threechoices.vite.config.ts
+new file mode 100644
+index 0000000..33152f1
+--- /dev/null
++++ b/packages/webgal/is-threechoices.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏三选项样片/public'),
++}));
+diff --git a/packages/webgal/is-titleloop.vite.config.ts b/packages/webgal/is-titleloop.vite.config.ts
+new file mode 100644
+index 0000000..7ae9300
+--- /dev/null
++++ b/packages/webgal/is-titleloop.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/开屏片头样片/public'),
++}));
+diff --git a/packages/webgal/is-twochoices.vite.config.ts b/packages/webgal/is-twochoices.vite.config.ts
+new file mode 100644
+index 0000000..45d7fbe
+--- /dev/null
++++ b/packages/webgal/is-twochoices.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../历史样片/新游戏双选项样片/public'),
++}));
+diff --git a/packages/webgal/is-v74-disc-hd.vite.config.ts b/packages/webgal/is-v74-disc-hd.vite.config.ts
+new file mode 100644
+index 0000000..b8096b0
+--- /dev/null
++++ b/packages/webgal/is-v74-disc-hd.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../新游戏打盘高清版/public'),
++}));
+diff --git a/packages/webgal/is-v74-disc.vite.config.ts b/packages/webgal/is-v74-disc.vite.config.ts
+new file mode 100644
+index 0000000..32b359d
+--- /dev/null
++++ b/packages/webgal/is-v74-disc.vite.config.ts
+@@ -0,0 +1,7 @@
++import { defineConfig, mergeConfig } from 'vite';
++import { resolve } from 'path';
++import baseConfig from './vite.config';
++
++export default mergeConfig(baseConfig, defineConfig({
++  publicDir: resolve(__dirname, '../../../新游戏打盘版/public'),
++}));
+diff --git a/packages/webgal/src/App.tsx b/packages/webgal/src/App.tsx
+index 5b1427a..19ba714 100644
+--- a/packages/webgal/src/App.tsx
++++ b/packages/webgal/src/App.tsx
+@@ -6,12 +6,15 @@ import { BottomControlPanel } from '@/UI/BottomControlPanel/BottomControlPanel';
+ import { BottomControlPanelFilm } from '@/UI/BottomControlPanel/BottomControlPanelFilm';
+ import { Backlog } from '@/UI/Backlog/Backlog';
+ import Title from '@/UI/Title/Title';
++import OpeningLoop from '@/UI/Title/OpeningLoop';
+ import Logo from '@/UI/Logo/Logo';
+ import { Extra } from '@/UI/Extra/Extra';
+ import Menu from '@/UI/Menu/Menu';
+ import GlobalDialog from '@/UI/GlobalDialog/GlobalDialog';
+ import PanicOverlay from '@/UI/PanicOverlay/PanicOverlay';
+ import DevPanel from '@/UI/DevPanel/DevPanel';
++import MangaReader from '@/UI/MangaReader/MangaReader';
++import CollectionNotice from '@/UI/Extra/CollectionNotice';
+ 
+ export default function App() {
+   useEffect(() => {
+@@ -25,9 +28,12 @@ export default function App() {
+       <BottomControlPanelFilm />
+       <Backlog />
+       <Title />
++      <OpeningLoop />
++      <CollectionNotice />
+       <Logo />
+       <Extra />
+       <Menu />
++      <MangaReader />
+       <GlobalDialog />
+       <PanicOverlay />
+       <DevPanel />
+diff --git a/packages/webgal/src/Core/Modules/flowchart.ts b/packages/webgal/src/Core/Modules/flowchart.ts
+index 3726438..a0868f2 100644
+--- a/packages/webgal/src/Core/Modules/flowchart.ts
++++ b/packages/webgal/src/Core/Modules/flowchart.ts
+@@ -8,6 +8,7 @@ import localforage from 'localforage';
+ export interface IFlowchartNodeData extends Record<string, unknown> {
+   label: string;
+   sceneName: string;
++  sourceLine?: number;
+   isRoot?: boolean;
+ }
+ 
+@@ -28,12 +29,14 @@ export interface IFlowchart {
+   id: string;
+   name: string;
+   type?: 'main' | 'character';
++  revealNodeId?: string;
+   nodes: IFlowchartNode[];
+   edges: IFlowchartEdge[];
+ }
+ 
+ export interface IFlowchartData {
+   flowcharts: IFlowchart[];
++  snapshotRevision?: string;
+ }
+ 
+ const FLOWCHART_UPDATED_EVENT = 'webgal-flowchart-updated';
+@@ -46,6 +49,9 @@ export class FlowchartManager {
+   private snapshots = new Map<string, ISaveData>();
+   private pendingUnlockCurrentScene = false;
+   private waitingUnlockSceneKey = '';
++  private sentenceNodes = new Map<string, Array<{ flowchart: IFlowchart; node: IFlowchartNode }>>();
++  private pendingNodes = new Map<string, { flowchart: IFlowchart; node: IFlowchartNode }>();
++  private pendingSentenceReady = false;
+ 
+   public constructor(private readonly sceneManager: SceneManager) {}
+ 
+@@ -55,10 +61,21 @@ export class FlowchartManager {
+     this.data = { flowcharts: [] };
+     this.unlocked.clear();
+     this.snapshots.clear();
++    this.sentenceNodes.clear();
++    this.cancelPending();
+     if (!enabled || !gameKey) return;
+     try {
+       const res = await axios.get('./game/flowchart.json');
+       this.data = normalizeFlowchartData(res.data);
++      for (const flowchart of this.data.flowcharts) {
++        for (const node of flowchart.nodes) {
++          if (typeof node.data.sourceLine !== 'number') continue;
++          const key = this.lineKey(normalizeSceneName(node.data.sceneName), node.data.sourceLine);
++          const matches = this.sentenceNodes.get(key) ?? [];
++          matches.push({ flowchart, node });
++          this.sentenceNodes.set(key, matches);
++        }
++      }
+       const unlocked = await localforage.getItem<string[]>(this.progressKey());
+       this.unlocked = new Set(Array.isArray(unlocked) ? unlocked : []);
+       this.unlockPendingCurrentScene();
+@@ -79,7 +96,10 @@ export class FlowchartManager {
+   public getVisibleFlowcharts() {
+     return this.data.flowcharts.filter(
+       (flowchart) =>
+-        flowchart.type === 'main' || flowchart.nodes.some((node) => this.isUnlocked(flowchart.id, node.id)),
++        flowchart.type === 'main' ||
++        (flowchart.revealNodeId
++          ? this.isUnlocked(flowchart.id, flowchart.revealNodeId)
++          : flowchart.nodes.some((node) => this.isUnlocked(flowchart.id, node.id))),
+     );
+   }
+ 
+@@ -103,6 +123,36 @@ export class FlowchartManager {
+     this.unlockCurrentScene(true);
+   }
+ 
++  public recordSentence(sourceLine: number, ready: boolean, ending: boolean) {
++    if (!this.hasFlowchart() || this.sentenceNodes.size === 0) return;
++    const scene = this.sceneManager.sceneData.currentScene;
++    for (const name of new Set([normalizeSceneName(scene.sceneName), normalizeSceneName(scene.sceneUrl)])) {
++      for (const match of this.sentenceNodes.get(this.lineKey(name, sourceLine)) ?? []) {
++        this.pendingNodes.set(this.nodeKey(match.flowchart.id, match.node.id), match);
++      }
++    }
++    if (ready && this.pendingNodes.size > 0) this.pendingSentenceReady = true;
++    if (ending) this.unlockPendingSentences(true);
++  }
++
++  public unlockPendingSentences(beforeEnd = false) {
++    if (this.pendingNodes.size === 0 || (!this.pendingSentenceReady && !beforeEnd)) return;
++    this.saveMatches([...this.pendingNodes.values()], true, beforeEnd);
++    this.pendingNodes.clear();
++    this.pendingSentenceReady = false;
++  }
++
++  public cancelPending() {
++    this.pendingNodes.clear();
++    this.pendingSentenceReady = false;
++    this.pendingUnlockCurrentScene = false;
++    this.waitingUnlockSceneKey = '';
++  }
++
++  private lineKey(sceneName: string, sourceLine: number) {
++    return `${sceneName}:${sourceLine}`;
++  }
++
+   public waitForCurrentSceneDialog() {
+     this.pendingUnlockCurrentScene = false;
+     this.waitingUnlockSceneKey = this.currentSceneKey();
+@@ -133,11 +183,19 @@ export class FlowchartManager {
+     ]);
+     const matched = this.data.flowcharts.flatMap((flowchart) =>
+       flowchart.nodes
+-        .filter((node) => sceneNames.has(normalizeSceneName(node.data?.sceneName)))
++        .filter((node) => node.data?.sourceLine === undefined && sceneNames.has(normalizeSceneName(node.data.sceneName)))
+         .map((node) => ({ flowchart, node })),
+     );
++    this.saveMatches(matched, refreshSnapshot);
++  }
++
++  private saveMatches(
++    matched: Array<{ flowchart: IFlowchart; node: IFlowchartNode }>,
++    refreshSnapshot: boolean,
++    beforeEnd = false,
++  ) {
+     if (matched.length === 0) return;
+-    const snapshot = this.createSnapshot();
++    const snapshot = this.createSnapshot(beforeEnd);
+     let changed = false;
+     matched.forEach(({ flowchart, node }) => {
+       const key = this.nodeKey(flowchart.id, node.id);
+@@ -156,15 +214,16 @@ export class FlowchartManager {
+     }
+   }
+ 
+-  private createSnapshot(): ISaveData {
++  private createSnapshot(beforeEnd = false): ISaveData {
+     return {
+-      nowStageState: cloneDeep(stageStateManager.getViewStageState()),
++      nowStageState: cloneDeep(beforeEnd ? stageStateManager.getCalculationStageState() : stageStateManager.getViewStageState()),
+       backlog: [],
+       index: -1,
+       saveTime: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString('chinese', { hour12: false }),
+       sceneData: {
+         currentSentenceId: this.sceneManager.sceneData.currentSentenceId,
+         sceneStack: cloneDeep(this.sceneManager.sceneData.sceneStack),
++        currentLocals: cloneDeep(this.sceneManager.sceneData.currentLocals),
+         sceneName: this.sceneManager.sceneData.currentScene.sceneName,
+         sceneUrl: this.sceneManager.sceneData.currentScene.sceneUrl,
+       },
+@@ -173,15 +232,16 @@ export class FlowchartManager {
+   }
+ 
+   private progressKey() {
+-    return `${this.gameKey}-flowchart`;
++    const version = this.data.snapshotRevision;
++    return version ? `${this.gameKey}-flowchart-${version}` : `${this.gameKey}-flowchart`;
+   }
+ 
+   private snapshotKey(flowchartId: string, nodeId: string) {
+-    return `${this.gameKey}-flowchart-${flowchartId}-${nodeId}`;
++    return this.snapshotKeyByNodeKey(this.nodeKey(flowchartId, nodeId));
+   }
+ 
+   private snapshotKeyByNodeKey(key: string) {
+-    return `${this.gameKey}-flowchart-${key}`;
++    return `${this.progressKey()}-${key}`;
+   }
+ 
+   private nodeKey(flowchartId: string, nodeId: string) {
+@@ -198,6 +258,7 @@ function normalizeFlowchartData(raw: string | IFlowchartData): IFlowchartData {
+   const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+   const flowcharts: IFlowchart[] = Array.isArray(data?.flowcharts) ? data.flowcharts : [];
+   return {
++    snapshotRevision: typeof data?.snapshotRevision === 'string' ? data.snapshotRevision : undefined,
+     flowcharts: flowcharts.map((flowchart) => ({
+       ...flowchart,
+       type: flowchart.id === 'main' ? 'main' : flowchart.type || 'character',
+diff --git a/packages/webgal/src/Core/Modules/stage/discDialoguePortrait.ts b/packages/webgal/src/Core/Modules/stage/discDialoguePortrait.ts
+new file mode 100644
+index 0000000..be72e40
+--- /dev/null
++++ b/packages/webgal/src/Core/Modules/stage/discDialoguePortrait.ts
+@@ -0,0 +1,6 @@
++import type { IFreeFigure } from './stageInterface';
++
++/** The v7.4 disc scripts keep 140×130 dialogue portraits in layer 4. */
++export function isDiscDialoguePortrait(figure: IFreeFigure): boolean {
++  return figure.key === 'ps2Layer4' && /\/figure\/disc-hd\/CHR_\d+\.png$/.test(figure.name);
++}
+diff --git a/packages/webgal/src/Core/controller/gamePlay/nextSentence.ts b/packages/webgal/src/Core/controller/gamePlay/nextSentence.ts
+index 8ae5fba..0ef03e1 100644
+--- a/packages/webgal/src/Core/controller/gamePlay/nextSentence.ts
++++ b/packages/webgal/src/Core/controller/gamePlay/nextSentence.ts
+@@ -94,6 +94,7 @@ export const commitForward = () => {
+   WebGAL.gameplay.performController.commitPendingPerforms();
+   stageStateManager.applyCommittedPixiEffects();
+   WebGAL.flowchartManager.unlockPendingCurrentScene();
++  WebGAL.flowchartManager.unlockPendingSentences();
+ };
+ 
+ /**
+diff --git a/packages/webgal/src/Core/controller/gamePlay/scriptExecutor.ts b/packages/webgal/src/Core/controller/gamePlay/scriptExecutor.ts
+index 5bda07e..7f2e25a 100644
+--- a/packages/webgal/src/Core/controller/gamePlay/scriptExecutor.ts
++++ b/packages/webgal/src/Core/controller/gamePlay/scriptExecutor.ts
+@@ -117,6 +117,15 @@ export const scriptExecutor = (depth = 0, options: ScriptExecutionOptions = {})
+     return;
+   }
+ 
++  if (!WebGAL.gameplay.isFastPreview) {
++    const command = currentScript.command;
++    WebGAL.flowchartManager.recordSentence(
++      sentenceId,
++      command === commandType.say || command === commandType.choose,
++      command === commandType.end,
++    );
++  }
++
+   if (currentScript.command === commandType.jumpLabel) {
+     // jumpLabel 是内核流程控制：只改变语句指针，并在本次 forward 内继续演算，不触发 commit。
+     const isJumped = jumpToLabel(currentScript.content);
+diff --git a/packages/webgal/src/Core/controller/gamePlay/startContinueGame.ts b/packages/webgal/src/Core/controller/gamePlay/startContinueGame.ts
+index 75c6d34..09c828b 100644
+--- a/packages/webgal/src/Core/controller/gamePlay/startContinueGame.ts
++++ b/packages/webgal/src/Core/controller/gamePlay/startContinueGame.ts
+@@ -16,6 +16,7 @@ import { stageStateManager } from '@/Core/Modules/stage/stageStateManager';
+  * 从头开始游戏
+  */
+ export const startGame = () => {
++  WebGAL.flowchartManager.cancelPending();
+   resetStage(true);
+ 
+   // 重新获取初始场景
+diff --git a/packages/webgal/src/Core/controller/stage/pixi/PixiController.ts b/packages/webgal/src/Core/controller/stage/pixi/PixiController.ts
+index 63e0f30..46becb6 100644
+--- a/packages/webgal/src/Core/controller/stage/pixi/PixiController.ts
++++ b/packages/webgal/src/Core/controller/stage/pixi/PixiController.ts
+@@ -54,6 +54,7 @@ export interface IStageObject {
+   /** 创建这个立绘时用的身份，见 syncPixiStageState 的 getFigureIdentity */
+   figureIdentity?: string;
+   isExiting?: boolean;
++  exitMask?: PIXI.Graphics;
+   releaseInstance?: () => void;
+   /** 口型、眨眼各自最新的换图请求，旧请求完成时据此丢弃 */
+   textureRequests?: Partial<Record<'mouth' | 'blink', string>>;
+@@ -405,7 +406,31 @@ export default class PixiStage {
+         const originalHeight = texture.height;
+         const scaleX = this.stageWidth / originalWidth;
+         const scaleY = this.stageHeight / originalHeight;
+-        const targetScale = Math.max(scaleX, scaleY);
++        const keepDiscComposition = url.includes('/disc-hd/');
++        const isWideDiscBackground = keepDiscComposition && /\/BG_\d+\.png$/.test(url) && scaleX < scaleY;
++        const targetScale = keepDiscComposition && !isWideDiscBackground
++          ? Math.min(scaleX, scaleY)
++          : Math.max(scaleX, scaleY);
++        const width = originalWidth * targetScale;
++        const height = originalHeight * targetScale;
++        if (this.getStageObjByKey(key)?.uuid === bgUuid &&
++          (width < this.stageWidth - 1 || height < this.stageHeight - 1)) {
++          // Let the incoming background own the margins as soon as its image is ready.
++          for (const outgoing of this.backgroundObjects) {
++            if (!outgoing.isExiting || !outgoing.pixiContainer) continue;
++            const mask = outgoing.exitMask ?? new PIXI.Graphics();
++            const clipWidth = outgoing.exitMask ? Math.min(width, mask.width) : width;
++            const clipHeight = outgoing.exitMask ? Math.min(height, mask.height) : height;
++            mask.clear().beginFill(0xffffff)
++              .drawRect((this.stageWidth - clipWidth) / 2, (this.stageHeight - clipHeight) / 2, clipWidth, clipHeight)
++              .endFill();
++            if (!outgoing.exitMask) {
++              this.backgroundContainer.addChild(mask);
++              outgoing.exitMask = mask;
++              outgoing.pixiContainer.mask = mask;
++            }
++          }
++        }
+         const bgSprite = new PIXI.Sprite(texture);
+         bgSprite.scale.x = targetScale;
+         bgSprite.scale.y = targetScale;
+@@ -1002,6 +1027,10 @@ export default class PixiStage {
+     }
+     if (indexBg >= 0) {
+       const bgSprite = this.backgroundObjects[indexBg];
++      if (bgSprite.pixiContainer && bgSprite.exitMask) {
++        bgSprite.pixiContainer.mask = null;
++        bgSprite.exitMask.destroy();
++      }
+       if (bgSprite.pixiContainer)
+         for (const element of bgSprite.pixiContainer.children) {
+           element.destroy({ children: true });
+diff --git a/packages/webgal/src/Core/controller/stage/pixi/syncPixiStageState.ts b/packages/webgal/src/Core/controller/stage/pixi/syncPixiStageState.ts
+index b11c29b..4a83ce4 100644
+--- a/packages/webgal/src/Core/controller/stage/pixi/syncPixiStageState.ts
++++ b/packages/webgal/src/Core/controller/stage/pixi/syncPixiStageState.ts
+@@ -15,6 +15,7 @@ import { setEbg } from '@/Core/gameScripts/changeBg/setEbg';
+ import { applyTransformToPixiContainer } from '@/Core/controller/stage/pixi/stageEffectTransform';
+ import { prefetchCurrentSceneByProgress } from '@/Core/util/prefetcher/progressPrefetcher';
+ import { prepareFigureDiff } from './prepareFigureDiff';
++import { isDiscDialoguePortrait } from '@/Core/Modules/stage/discDialoguePortrait';
+ 
+ interface ISyncFigureSlotPayload {
+   key: string;
+@@ -103,13 +104,12 @@ function syncBg(stageState: IStageState, skipAnimation: boolean) {
+ 
+   if (bgName !== '') {
+     if (currentBg?.sourceUrl === bgName) return;
+-    if (currentBg) {
+-      removeBg(currentBg, skipAnimation);
+-    }
++    const exitDuration = currentBg ? removeBg(currentBg, skipAnimation) : 0;
+     addBg(thisBgKey, bgName);
+     logger.debug('重设背景');
+     const isSkipAnimation = skipAnimation || WebGAL.gameplay.skipAnimation;
+-    setEbg(bgName, isSkipAnimation ? 0 : getEnterDuration(stageState, thisBgKey, true));
++    const enterDuration = getEnterDuration(stageState, thisBgKey, true);
++    setEbg(bgName, isSkipAnimation ? 0 : Math.max(enterDuration, exitDuration));
+     return;
+   }
+ 
+@@ -132,7 +132,8 @@ function syncFigures(stageState: IStageState, skipAnimation: boolean) {
+     });
+   }
+ 
+-  for (const fig of stageState.freeFigure) {
++  const freeFigures = stageState.freeFigure.filter((figure) => !isDiscDialoguePortrait(figure));
++  for (const fig of freeFigures) {
+     syncFigureSlot({
+       key: fig.key,
+       sourceUrl: fig.name,
+@@ -144,7 +145,7 @@ function syncFigures(stageState: IStageState, skipAnimation: boolean) {
+ 
+   const currentFigures = WebGAL.gameplay.pixiStage?.getFigureObjects();
+   if (!currentFigures) return;
+-  const freeFigureKeys = new Set(stageState.freeFigure.map((fig) => fig.key));
++  const freeFigureKeys = new Set(freeFigures.map((fig) => fig.key));
+   for (const existFigure of [...currentFigures]) {
+     if (FIGURE_KEYS.includes(existFigure.key) || existFigure.key.endsWith('-off')) {
+       continue;
+@@ -254,7 +255,8 @@ function removeBg(bgObject: IStageObject, skipAnimation: boolean): number {
+     return 0;
+   }
+   const oldBgKey = bgObject.key;
+-  bgObject.key = 'bg-main-off' + String(new Date().getTime());
++  bgObject.isExiting = true;
++  bgObject.key = 'bg-main-off-' + bgObject.uuid;
+   const bgKey = bgObject.key;
+   const bgAniKey = bgObject.key + '-softoff';
+   pixiStage.removeStageObjectByKey(oldBgKey);
+diff --git a/packages/webgal/src/Core/controller/storage/loadGame.ts b/packages/webgal/src/Core/controller/storage/loadGame.ts
+index d3aaf80..30c7e7f 100644
+--- a/packages/webgal/src/Core/controller/storage/loadGame.ts
++++ b/packages/webgal/src/Core/controller/storage/loadGame.ts
+@@ -31,6 +31,7 @@ export function loadGameFromStageData(stageData: ISaveData) {
+     return;
+   }
+   const loadFile = stageData;
++  WebGAL.flowchartManager.cancelPending();
+   // 重新获取并同步场景状态
+   sceneFetcher(loadFile.sceneData.sceneUrl).then((rawScene) => {
+     WebGAL.sceneManager.sceneData.currentScene = sceneParser(
+diff --git a/packages/webgal/src/Core/controller/storage/storageController.ts b/packages/webgal/src/Core/controller/storage/storageController.ts
+index e35d593..3f7d0b9 100644
+--- a/packages/webgal/src/Core/controller/storage/storageController.ts
++++ b/packages/webgal/src/Core/controller/storage/storageController.ts
+@@ -1,11 +1,12 @@
+ import * as localforage from 'localforage';
+-import { IUserData } from '@/store/userDataInterface';
++import { IAppreciationAsset, IUserData } from '@/store/userDataInterface';
+ import { logger } from '../../util/logger';
+ import { webgalStore } from '@/store/store';
+ import { initState, resetUserData } from '@/store/userDataReducer';
+ import cloneDeep from 'lodash/cloneDeep';
+ 
+ import { WebGAL } from '@/Core/WebGAL';
++import { appreciationMusicName } from '@/Core/util/appreciationMusicName';
+ 
+ /**
+  * 写入本地存储
+@@ -115,14 +116,37 @@ function normalizeUserData(userData: Partial<IUserData>): IUserData {
+     appreciationData: {
+       ...defaultUserData.appreciationData,
+       ...appreciationData,
+-      bgm: Array.isArray(appreciationData.bgm) ? appreciationData.bgm : defaultUserData.appreciationData.bgm,
+-      cg: Array.isArray(appreciationData.cg) ? appreciationData.cg : defaultUserData.appreciationData.cg,
++      bgm: Array.isArray(appreciationData.bgm)
++        ? appreciationData.bgm.map((entry: IAppreciationAsset) => (
++            typeof entry?.name === 'string' ? { ...entry, name: appreciationMusicName(entry.name) } : entry
++          ))
++        : defaultUserData.appreciationData.bgm,
++      cg: Array.isArray(appreciationData.cg) ? normalizeDiscCg(appreciationData.cg) : defaultUserData.appreciationData.cg,
+     },
+     gameConfigInit: isObject(userData.gameConfigInit) ? userData.gameConfigInit : {},
+     readHistory: isObject(userData.readHistory) ? userData.readHistory : {},
+   };
+ }
+ 
++function normalizeDiscCg(entries: IAppreciationAsset[]): IAppreciationAsset[] {
++  if (WebGAL.gameKey !== 'ISPv74DiscHD01') return entries;
++
++  const repaired = new Map<string, IAppreciationAsset>();
++  for (const entry of entries) {
++    if (entry.url === './game/background/MV_END01' || entry.url === './game/background/EV_0136.png') {
++      const url = './game/background/EV_0136.png';
++      repaired.set(url, { ...entry, url, name: 'EV_END01「エンディング」',
++        order: 136, thumb: './game/background/thumb/EV_0136.webp' });
++    } else if (entry.url === './game/background/EV_0088.png') {
++      repaired.set(entry.url, { ...entry, name: 'EV036「泉と神社へ」',
++        order: 88, thumb: './game/background/thumb/EV_0088.webp' });
++    } else {
++      repaired.set(entry.url, entry);
++    }
++  }
++  return [...repaired.values()];
++}
++
+ function isObject(value: unknown): value is Record<string, any> {
+   return typeof value === 'object' && value !== null && !Array.isArray(value);
+ }
+diff --git a/packages/webgal/src/Core/gameScripts/changeBg/index.ts b/packages/webgal/src/Core/gameScripts/changeBg/index.ts
+index b898e44..6940e0b 100644
+--- a/packages/webgal/src/Core/gameScripts/changeBg/index.ts
++++ b/packages/webgal/src/Core/gameScripts/changeBg/index.ts
+@@ -35,6 +35,21 @@ export const changeBg = (sentence: ISentence): IPerform => {
+   const exitDuration = getNumberArgByKey(sentence, 'exitDuration') ?? DEFAULT_BG_OUT_DURATION;
+   const ease = getStringArgByKey(sentence, 'ease') ?? '';
+   const ignoreDefault = getBooleanArgByKey(sentence, 'ignoreDefault') ?? false;
++  const clearFigureIds = getStringArgByKey(sentence, 'clearFigureIds');
++  if (clearFigureIds) {
++    const ids = new Set(clearFigureIds.split(',').map((id) => id.trim()));
++    const figures = stageStateManager.getCalculationStageState().freeFigure.filter((figure) => ids.has(figure.key));
++    for (const figure of figures) {
++      const target = figure.key;
++      WebGAL.gameplay.performController.unmountPerform(`animation-${target}`, true);
++      stageStateManager.removeEffectByTargetId(target);
++      stageStateManager.removeAnimationSettingsByTarget(target);
++      const exitTarget = `${target}-off`;
++      stageStateManager.removeAnimationSettingsByTargetOff(exitTarget);
++      stageStateManager.updateAnimationSettings({ target: exitTarget, key: 'exitDuration', value: 0 });
++      stageStateManager.setFreeFigureByKey({ ...figure, name: '' });
++    }
++  }
+ 
+   const dispatch = webgalStore.dispatch;
+   if (unlockName !== '') {
+diff --git a/packages/webgal/src/Core/gameScripts/changeBg/setEbg.ts b/packages/webgal/src/Core/gameScripts/changeBg/setEbg.ts
+index cae9598..a765d5d 100644
+--- a/packages/webgal/src/Core/gameScripts/changeBg/setEbg.ts
++++ b/packages/webgal/src/Core/gameScripts/changeBg/setEbg.ts
+@@ -5,19 +5,28 @@ let animation: Animation | null = null;
+ 
+ export function setEbg(url: string, duration = DEFAULT_BG_IN_DURATION, ease = 'ease-in-out') {
+   const ebg = document.getElementById('ebg') as HTMLElement;
++  const isDiscCg = /\/disc-hd\/EV_\d+\.png$/i.test(url);
++  const wasDiscCg = /\/disc-hd\/EV_\d+\.png$/i.test(previousImageUrl);
++  animation?.cancel();
++  animation = null;
+   if (ebg) {
+     ebg.style.backgroundImage = getValidBgImage(url);
++    ebg.classList.toggle('html-body__effect-background--disc-cg', isDiscCg || (duration > 0 && wasDiscCg));
+   }
+   const ebgOverlay = document.getElementById('ebgOverlay') as HTMLElement;
+   if (ebgOverlay) {
+     ebgOverlay.style.backgroundImage = getValidBgImage(previousImageUrl);
+-    if (animation) {
+-      animation.cancel();
++    if (duration > 0 && url !== previousImageUrl) {
++      animation = ebgOverlay.animate([{ opacity: 1 }, { opacity: 0 }], { duration, easing: ease });
++      animation.onfinish = () => {
++        ebgOverlay.style.backgroundImage = 'none';
++        ebg?.classList.toggle('html-body__effect-background--disc-cg', isDiscCg);
++        animation = null;
++      };
++    } else {
++      ebgOverlay.style.backgroundImage = 'none';
++      ebg?.classList.toggle('html-body__effect-background--disc-cg', isDiscCg);
+     }
+-    animation = ebgOverlay.animate([{ opacity: 1 }, { opacity: 0 }], {
+-      duration: duration,
+-      easing: ease,
+-    });
+   }
+   previousImageUrl = url;
+ }
+diff --git a/packages/webgal/src/Core/gameScripts/playVideo.tsx b/packages/webgal/src/Core/gameScripts/playVideo.tsx
+index 083521c..8e5d445 100644
+--- a/packages/webgal/src/Core/gameScripts/playVideo.tsx
++++ b/packages/webgal/src/Core/gameScripts/playVideo.tsx
+@@ -5,7 +5,8 @@ import ReactDOM from 'react-dom';
+ import styles from '@/Stage/FullScreenPerform/fullScreenPerform.module.scss';
+ import { webgalStore } from '@/store/store';
+ import { getRandomPerformName } from '@/Core/Modules/perform/performController';
+-import { getBooleanArgByKey } from '@/Core/util/getSentenceArg';
++import { getBooleanArgByKey, getNumberArgByKey, getStringArgByKey } from '@/Core/util/getSentenceArg';
++import { unlockCgFromAsset } from '@/Core/util/unlockCgFromAsset';
+ import { WebGAL } from '@/Core/WebGAL';
+ /**
+  * 播放一段视频 * @param sentence
+@@ -16,6 +17,14 @@ export const playVideo = (sentence: ISentence): IPerform => {
+   const vocalVol = mainVol * 0.01 * userDataState.optionData.vocalVolume * 0.01;
+   const bgmVol = mainVol * 0.01 * userDataState.optionData.bgmVolume * 0.01;
+   const performInitName: string = getRandomPerformName();
++  const unlockName = getStringArgByKey(sentence, 'unlockname') ?? '';
++  const unlockFile = getStringArgByKey(sentence, 'unlockfile') ?? '';
++  const unlockThumb = getStringArgByKey(sentence, 'unlockthumb') ?? '';
++  const unlockOrder = getNumberArgByKey(sentence, 'unlockorder') ?? 0;
++  const viewportHost = sentence.content.endsWith('/MV_END01_phone60.mp4')
++    ? document.getElementById('html-body__ending-video')
++    : null;
++  const videoHost = viewportHost ?? document.getElementById('videoContainer');
+ 
+   let blockingNextFlag = getBooleanArgByKey(sentence, 'skipOff') ?? false;
+   let isOver = false;
+@@ -35,7 +44,7 @@ export const playVideo = (sentence: ISentence): IPerform => {
+       vocalElement.volume = vocalVol.toString();
+     }
+     // eslint-disable-next-line react/no-deprecated
+-    ReactDOM.render(<div />, document.getElementById('videoContainer'));
++    if (videoHost) ReactDOM.render(<div />, videoHost);
+   };
+   const endPerform = () => {
+     if (isOver) return;
+@@ -52,10 +61,19 @@ export const playVideo = (sentence: ISentence): IPerform => {
+     startFunction: () => {
+       // eslint-disable-next-line react/no-deprecated
+       ReactDOM.render(
+-        <div className={styles.videoContainer}>
+-          <video className={styles.fullScreen_video} id="playVideoElement" src={sentence.content} autoPlay={true} />
++        <div
++          className={styles.videoContainer}
++          onDoubleClick={viewportHost ? () => WebGAL.events.fullscreenDbClick.emit() : undefined}
++        >
++          <video
++            className={styles.fullScreen_video}
++            id="playVideoElement"
++            src={sentence.content}
++            autoPlay={true}
++            playsInline={!!viewportHost}
++          />
+         </div>,
+-        document.getElementById('videoContainer'),
++        videoHost,
+         // 挂载完成后再操作视频元素，不依赖固定延时猜测 DOM 是否就绪。
+         () => {
+           if (isOver) return;
+@@ -77,6 +95,16 @@ export const playVideo = (sentence: ISentence): IPerform => {
+ 
+             VocalControl.addEventListener('error', () => endPerform());
+             VocalControl.addEventListener('ended', () => endPerform());
++            // 视频真正开始播放时才解锁，和 changeBg / bgm 的原生解锁时机一致。
++            VocalControl.addEventListener(
++              'playing',
++              () => {
++                if (unlockName && unlockFile) {
++                  unlockCgFromAsset(unlockFile, unlockName, unlockOrder, unlockThumb || undefined);
++                }
++              },
++              { once: true },
++            );
+             VocalControl.play().catch(() => endPerform());
+             if (!blockingNextFlag) {
+               WebGAL.events.fullscreenDbClick.on(skipVideo);
+diff --git a/packages/webgal/src/Core/gameScripts/unlockCg.ts b/packages/webgal/src/Core/gameScripts/unlockCg.ts
+index 9dcf694..4b4166b 100644
+--- a/packages/webgal/src/Core/gameScripts/unlockCg.ts
++++ b/packages/webgal/src/Core/gameScripts/unlockCg.ts
+@@ -7,6 +7,7 @@ import localforage from 'localforage';
+ 
+ import { WebGAL } from '@/Core/WebGAL';
+ import { getStringArgByKey, getNumberArgByKey } from '../util/getSentenceArg';
++import { assetSetter, fileType } from '@/Core/util/gameAssetsAccess/assetSetter';
+ 
+ /**
+  * 解锁cg
+@@ -17,8 +18,17 @@ export const unlockCg = (sentence: ISentence): IPerform => {
+   const name = getStringArgByKey(sentence, 'name') ?? sentence.content;
+   const series = getStringArgByKey(sentence, 'series') ?? 'default';
+   const order = getNumberArgByKey(sentence, 'order') ?? 0;
++  const thumb = getStringArgByKey(sentence, 'thumb') ?? '';
+   logger.info(`解锁CG：${name}，路径：${url}，所属系列：${series}，排序：${order}`);
+-  webgalStore.dispatch(unlockCgInUserData({ name, url, series, order }));
++  webgalStore.dispatch(
++    unlockCgInUserData({
++      name,
++      url,
++      series,
++      order,
++      thumb: thumb ? assetSetter(thumb, fileType.background) : undefined,
++    }),
++  );
+   const userDataState = webgalStore.getState().userData;
+   localforage.setItem(WebGAL.gameKey, userDataState).then(() => {});
+   return createNonePerform();
+diff --git a/packages/webgal/src/Core/initializeScript.ts b/packages/webgal/src/Core/initializeScript.ts
+index 1cb1ed0..24f551b 100644
+--- a/packages/webgal/src/Core/initializeScript.ts
++++ b/packages/webgal/src/Core/initializeScript.ts
+@@ -14,6 +14,7 @@ import axios from 'axios';
+ import { __INFO } from '@/config/info';
+ import { WebGAL } from '@/Core/WebGAL';
+ import { loadTemplate } from '@/Core/util/coreInitialFunction/templateLoader';
++import { loadAppreciationPreset } from '@/Core/util/coreInitialFunction/appreciationPreset';
+ import { stageStateManager } from '@/Core/Modules/stage/stageStateManager';
+ import { autoFastSaveGame } from './controller/storage/fastSaveLoad';
+ 
+@@ -53,8 +54,11 @@ export const initializeScript = (): void => {
+     WebGAL.sceneManager.settledScenes.add(sceneUrl); // 放入已加载场景列表，避免递归加载相同场景
+     WebGAL.flowchartManager.waitForCurrentSceneDialog();
+   });
+-  // 获取游戏信息
+-  infoFetcher('./game/config.txt');
++  // 获取游戏信息；读到配置后再按需预置鉴赏数据（Appreciation_Preset）
++  infoFetcher('./game/config.txt').then((gameConfig) => {
++    const preset = gameConfig.Appreciation_Preset;
++    loadAppreciationPreset(typeof preset === 'string' && preset !== '' ? preset : undefined);
++  });
+   /**
+    * 启动Pixi
+    */
+diff --git a/packages/webgal/src/Core/util/appreciationMusicName.ts b/packages/webgal/src/Core/util/appreciationMusicName.ts
+new file mode 100644
+index 0000000..45e16d5
+--- /dev/null
++++ b/packages/webgal/src/Core/util/appreciationMusicName.ts
+@@ -0,0 +1,4 @@
++/** Display names from older resource packs and saves without the port attribution. */
++export function appreciationMusicName(name: string): string {
++  return name.replace(/^移植版命名[・·\s]*(曲目\d+)(?:[・·\s]+SE_\d{5})?$/u, '$1');
++}
+diff --git a/packages/webgal/src/Core/util/coreInitialFunction/appreciationPreset.ts b/packages/webgal/src/Core/util/coreInitialFunction/appreciationPreset.ts
+new file mode 100644
+index 0000000..dcca1b6
+--- /dev/null
++++ b/packages/webgal/src/Core/util/coreInitialFunction/appreciationPreset.ts
+@@ -0,0 +1,94 @@
++/**
++ * @file 鉴赏数据批量预置
++ *
++ * 原版游戏的 CG／影片鉴赏是“玩过的内容才解锁”，移植工程里所有素材都已经随游戏发布，
++ * 因此允许用一份数据文件把鉴赏条目一次性接进 WebGAL 原生鉴赏页（Extra），
++ * 而不是另做一套画廊界面。
++ *
++ * 在 game/config.txt 里用 Appreciation_Preset 指定数据文件（相对于 game/），未指定时不读取，
++ * 也不会产生请求，不影响其他工程：
++ *
++ *   Appreciation_Preset:appreciation.json;
++ *
++ * 数据文件格式（文件放在 game/ 下）：
++ *
++ *   {
++ *     "cg": [{ "file": "EV_0000.png", "name": "EV_0000", "order": 0, "thumb": "thumb/EV_0000.webp" }],
++ *     "bgm": [{ "file": "s_Title.mp3", "name": "标题曲" }]
++ *   }
++ *
++ * thumb 可选：鉴赏列表里显示的小图；不填就直接用 file 原图。
++ *
++ * file 是 game/background/（CG）或 game/bgm/（BGM）下的文件名，和 WebGAL 的
++ * unlockCg / unlockBgm 指令一样经 assetSetter 补全路径；已存在的条目按 url 去重。
++ */
++import axios from 'axios';
++import { webgalStore } from '@/store/store';
++import { unlockBgmInUserData, unlockCgInUserData } from '@/store/userDataReducer';
++import { setStorageAsync } from '@/Core/controller/storage/storageController';
++import { assetSetter, fileType } from '@/Core/util/gameAssetsAccess/assetSetter';
++import { logger } from '@/Core/util/logger';
++
++interface IAppreciationPresetItem {
++  file?: string;
++  name?: string;
++  series?: string;
++  order?: number;
++  thumb?: string;
++}
++
++interface IAppreciationPreset {
++  cg?: IAppreciationPresetItem[];
++  bgm?: IAppreciationPresetItem[];
++}
++
++export const loadAppreciationPreset = async (presetPath?: string): Promise<void> => {
++  if (!presetPath) return;
++  const dispatch = webgalStore.dispatch;
++  try {
++    // 用 validateStatus 自己判断，文件缺失时只记一条日志，不抛异常
++    const response = await axios.get(`./game/${presetPath}`, { validateStatus: () => true });
++    if (response.status !== 200) {
++      logger.warn(`鉴赏预置文件读取失败：${presetPath}（HTTP ${response.status}），跳过预置`);
++      return;
++    }
++    const preset = (response.data ?? {}) as IAppreciationPreset;
++    const cgList = Array.isArray(preset.cg) ? preset.cg : [];
++    const bgmList = Array.isArray(preset.bgm) ? preset.bgm : [];
++    if (cgList.length === 0 && bgmList.length === 0) return;
++
++    cgList.forEach((item, index) => {
++      if (!item || typeof item.file !== 'string' || item.file === '') return;
++      dispatch(
++        unlockCgInUserData({
++          name: item.name ?? item.file,
++          url: assetSetter(item.file, fileType.background),
++          series: item.series ?? 'default',
++          order: typeof item.order === 'number' ? item.order : index,
++          thumb:
++            typeof item.thumb === 'string' && item.thumb !== ''
++              ? assetSetter(item.thumb, fileType.background)
++              : undefined,
++        }),
++      );
++    });
++    bgmList.forEach((item, index) => {
++      if (!item || typeof item.file !== 'string' || item.file === '') return;
++      dispatch(
++        unlockBgmInUserData({
++          name: item.name ?? item.file,
++          url: assetSetter(item.file, fileType.bgm),
++          series: item.series ?? 'default',
++          order: typeof item.order === 'number' ? item.order : index,
++        }),
++      );
++    });
++
++    // 直接写入本地存储：GETSTORAGE 的防抖读盘可能在启动阶段把旧数据恢复回来，
++    // 预置必须落盘，之后任何一次 getStorage() 读到的都是带预置的版本。
++    await setStorageAsync();
++    logger.info(`鉴赏预置已写入：CG ${cgList.length} 项，BGM ${bgmList.length} 项（${presetPath}）`);
++  } catch (error) {
++    logger.warn('鉴赏预置读取失败，跳过预置', error);
++  }
++};
+diff --git a/packages/webgal/src/Core/util/unlockCgFromAsset.ts b/packages/webgal/src/Core/util/unlockCgFromAsset.ts
+new file mode 100644
+index 0000000..762cf81
+--- /dev/null
++++ b/packages/webgal/src/Core/util/unlockCgFromAsset.ts
+@@ -0,0 +1,24 @@
++import { webgalStore } from '@/store/store';
++import { unlockCgInUserData } from '@/store/userDataReducer';
++import { setStorageAsync } from '@/Core/controller/storage/storageController';
++import { assetSetter, fileType } from '@/Core/util/gameAssetsAccess/assetSetter';
++
++/**
++ * 用剧情之外的演出（片头、片尾视频）实际开始播放时解锁一张 CG。
++ *
++ * 仍然走 WebGAL 原生 userData.appreciationData 和按 URL 去重的 reducer，
++ * 不新增旁路状态；缩略图路径与场景里的 unlockCg 一样由 assetSetter 补全。
++ */
++export const unlockCgFromAsset = (file: string, name: string, order = 0, thumb?: string): void => {
++  if (!file) return;
++  webgalStore.dispatch(
++    unlockCgInUserData({
++      name,
++      url: assetSetter(file, fileType.background),
++      series: 'default',
++      order,
++      thumb: thumb ? assetSetter(thumb, fileType.background) : undefined,
++    }),
++  );
++  void setStorageAsync();
++};
+diff --git a/packages/webgal/src/Stage/AudioContainer/AudioContainer.tsx b/packages/webgal/src/Stage/AudioContainer/AudioContainer.tsx
+index 764f828..73973b8 100644
+--- a/packages/webgal/src/Stage/AudioContainer/AudioContainer.tsx
++++ b/packages/webgal/src/Stage/AudioContainer/AudioContainer.tsx
+@@ -13,12 +13,20 @@ export const AudioContainer = () => {
+   const mainVol = userDataState.optionData.volumeMain;
+   const vocalBaseVol = mainVol * 0.01 * userDataState.optionData.vocalVolume * 0.01;
+   const vocalVol = vocalBaseVol * stageStore.vocalVolume * 0.01;
+-  const bgmVol = mainVol * 0.01 * userDataState.optionData.bgmVolume * 0.01 * stageStore.bgm.volume * 0.01;
+-  const bgmEnter = stageStore.bgm.enter;
++  const bgmSrc = isShowTitle ? titleBgm : stageStore.bgm.src;
++  const trackVolume = isShowTitle ? 100 : stageStore.bgm.volume;
++  const bgmVol = mainVol * 0.01 * userDataState.optionData.bgmVolume * 0.01 * trackVolume * 0.01;
++  const bgmEnter = isShowTitle ? 0 : stageStore.bgm.enter;
+   const uiSoundEffects = stageStore.uiSe;
+   const seVol = mainVol * 0.01 * (userDataState.optionData?.seVolume ?? 100) * 0.01;
+   const uiSeVol = mainVol * 0.01 * (userDataState.optionData.uiSeVolume ?? 50) * 0.01;
+   const isEnterGame = useSelector((state: RootState) => state.GUI.isEnterGame);
++  const pauseBgm = useSelector(({ GUI }: RootState) =>
++    GUI.showMangaReader || (GUI.showTitle && (
++      GUI.titleOpeningActive || GUI.showMenuPanel || GUI.showExtra ||
++      GUI.showGlobalDialog || GUI.showBacklog || GUI.showPanicOverlay
++    )),
++  );
+ 
+   // 淡入淡出定时器
+   const [fadeTimer, setFadeTimer] = useState(setTimeout(() => {}, 0));
+@@ -67,12 +75,36 @@ export const AudioContainer = () => {
+     const bgmElement = document.getElementById('currentBgm') as HTMLAudioElement;
+     // 如果当前背景音乐元素存在，则淡入淡出
+     if (bgmElement) {
+-      bgmEnter === 0 ? (bgmElement.volume = bgmVol) : bgmFadeIn(bgmElement, bgmVol, bgmEnter);
+-      if (bgmElement.src && isEnterGame) {
+-        bgmElement.play().catch(() => {});
++      if (pauseBgm) {
++        bgmElement.pause();
++        return;
+       }
++      bgmEnter === 0 ? (bgmElement.volume = bgmVol) : bgmFadeIn(bgmElement, bgmVol, bgmEnter);
++      if (!bgmSrc || (isShowTitle && !isEnterGame)) return;
++      let disposed = false;
++      const retry = () => {
++        window.removeEventListener('click', retry);
++        window.removeEventListener('keydown', retry);
++        if (!disposed && bgmElement.paused) {
++          void bgmElement.play().catch((error) => logger.warn('背景音乐播放失败', error));
++        }
++      };
++      void bgmElement.play().catch((error) => {
++        if (disposed) return;
++        if (!isShowTitle && error.name === 'NotAllowedError') {
++          window.addEventListener('click', retry);
++          window.addEventListener('keydown', retry);
++        } else if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
++          logger.warn('背景音乐播放失败', error);
++        }
++      });
++      return () => {
++        disposed = true;
++        window.removeEventListener('click', retry);
++        window.removeEventListener('keydown', retry);
++      };
+     }
+-  }, [isShowTitle, titleBgm, stageStore.bgm.src, bgmVol, bgmEnter, isEnterGame]);
++  }, [isShowTitle, bgmSrc, bgmVol, bgmEnter, isEnterGame, pauseBgm]);
+ 
+   useEffect(() => {
+     logger.debug(`设置背景音量：${bgmVol}`);
+@@ -125,9 +157,8 @@ export const AudioContainer = () => {
+       <audio
+         key={isShowTitle.toString() + titleBgm}
+         id="currentBgm"
+-        src={isShowTitle ? titleBgm : stageStore.bgm.src}
++        src={bgmSrc || undefined}
+         loop={true}
+-        autoPlay={isEnterGame}
+       />
+       <audio key={stageStore.playVocal} id="currentVocal" src={stageStore.playVocal} />
+     </div>
+diff --git a/packages/webgal/src/Stage/FullScreenPerform/fullScreenPerform.module.scss b/packages/webgal/src/Stage/FullScreenPerform/fullScreenPerform.module.scss
+index b737e72..b5fc298 100644
+--- a/packages/webgal/src/Stage/FullScreenPerform/fullScreenPerform.module.scss
++++ b/packages/webgal/src/Stage/FullScreenPerform/fullScreenPerform.module.scss
+@@ -121,5 +121,6 @@
+   width: 100%;
+   height: 100%;
+   z-index: 11;
++  pointer-events: auto;
+   background: rgba(0, 0, 0, 1);
+ }
+diff --git a/packages/webgal/src/Stage/TextBox/IMSSTextbox.tsx b/packages/webgal/src/Stage/TextBox/IMSSTextbox.tsx
+index e694219..fc88b69 100644
+--- a/packages/webgal/src/Stage/TextBox/IMSSTextbox.tsx
++++ b/packages/webgal/src/Stage/TextBox/IMSSTextbox.tsx
+@@ -211,6 +211,9 @@ export default function IMSSTextbox(props: ITextboxProps) {
+   const finalTextLineHeight = textLineHeight ? Number(textLineHeight) : lineHeightValue;
+   const lineHeightCssStr = `line-height: ${finalTextLineHeight}em`;
+   const lhCss = css(lineHeightCssStr);
++  const layoutClass = miniAvatar === ''
++    ? applyStyle('TextBox_main_miniavatarOff', styles.TextBox_main_miniavatarOff)
++    : applyStyle('TextBox_main_miniavatarOn', '');
+ 
+   return (
+     <>
+@@ -222,28 +225,21 @@ export default function IMSSTextbox(props: ITextboxProps) {
+               ' ' +
+               applyStyle('TextBox_Background', styles.TextBox_Background) +
+               ' ' +
+-              (miniAvatar === ''
+-                ? applyStyle('TextBox_main_miniavatarOff', styles.TextBox_main_miniavatarOff)
+-                : undefined)
++              layoutClass
+             }
+             style={{
+               opacity: `${textboxOpacity / 100}`,
+             }}
+           />
+           <div
+-            id="textBoxMain"
+-            className={
+-              applyStyle('TextBox_main', styles.TextBox_main) +
+-              ' ' +
+-              (miniAvatar === ''
+-                ? applyStyle('TextBox_main_miniavatarOff', styles.TextBox_main_miniavatarOff)
+-                : undefined)
+-            }
++            id={isPreview ? undefined : 'textBoxMain'}
++            data-textbox-preview={isPreview || undefined}
++            className={`${applyStyle('TextBox_main', styles.TextBox_main)} ${layoutClass}`}
+             style={{
+               fontFamily: font,
+             }}
+           >
+-            <div id="miniAvatar" className={applyStyle('miniAvatarContainer', styles.miniAvatarContainer)}>
++            <div id={isPreview ? undefined : 'miniAvatar'} className={applyStyle('miniAvatarContainer', styles.miniAvatarContainer)}>
+               {miniAvatar !== '' && (
+                 <img className={applyStyle('miniAvatarImg', styles.miniAvatarImg)} alt="miniAvatar" src={miniAvatar} />
+               )}
+diff --git a/packages/webgal/src/Stage/TextBox/TextBox.tsx b/packages/webgal/src/Stage/TextBox/TextBox.tsx
+index 34c1738..81e95a8 100644
+--- a/packages/webgal/src/Stage/TextBox/TextBox.tsx
++++ b/packages/webgal/src/Stage/TextBox/TextBox.tsx
+@@ -12,6 +12,7 @@ import useEscape from '@/hooks/useEscape';
+ import { useStageState } from '@/hooks/useStageState';
+ import { concatTextLines } from './concatTextLines';
+ import { getDialogSegments } from '@/Core/Modules/stage/dialogText';
++import { isDiscDialoguePortrait } from '@/Core/Modules/stage/discDialoguePortrait';
+ 
+ const userAgent = navigator.userAgent;
+ const isFirefox = /firefox/i.test(userAgent);
+@@ -46,7 +47,7 @@ export const TextBox = () => {
+   const isHasName = stageState.showName !== '';
+   const showName = compileSentence(stageState.showName, lineLimit);
+   const currentDialogKey = stageState.currentDialogKey;
+-  const miniAvatar = stageState.miniAvatar;
++  const miniAvatar = stageState.miniAvatar || stageState.freeFigure.find(isDiscDialoguePortrait)?.name || '';
+   const textboxOpacity = userDataState.optionData.textboxOpacity;
+   const Textbox = IMSSTextbox;
+   const fontOptimization = guiState.fontOptimization;
+diff --git a/packages/webgal/src/UI/BottomControlPanel/BottomControlPanel.tsx b/packages/webgal/src/UI/BottomControlPanel/BottomControlPanel.tsx
+index 6ab5b2b..d27d466 100644
+--- a/packages/webgal/src/UI/BottomControlPanel/BottomControlPanel.tsx
++++ b/packages/webgal/src/UI/BottomControlPanel/BottomControlPanel.tsx
+@@ -18,6 +18,7 @@ import {
+   DoubleUp,
+   FolderOpen,
+   FullScreen,
++  HamburgerButton,
+   Home,
+   Lock,
+   OffScreen,
+@@ -29,11 +30,14 @@ import {
+   SettingTwo,
+   TreeDiagram,
+   Unlock,
++  ChartHistogram,
+ } from '@icon-park/react';
+ import { useTranslation } from 'react-i18next';
+ import { useDispatch, useSelector } from 'react-redux';
+ import styles from './bottomControlPanel.module.scss';
+ import { useStageState } from '@/hooks/useStageState';
++import { createPortal } from 'react-dom';
++import { useState } from 'react';
+ 
+ export const BottomControlPanel = () => {
+   const t = useTrans('gaming.');
+@@ -42,15 +46,21 @@ export const BottomControlPanel = () => {
+   const { playSeEnter, playSeClick, playSeDialogOpen } = useSoundEffect();
+   const lang = i18n.language;
+   const isFr = lang === 'fr';
+-  let size = 42;
+-  let fontSize = '150%';
+-  if (isFr) {
++  const isMobile =
++    typeof document !== 'undefined' &&
++    (document.documentElement.classList.contains('is-mobile-device') ||
++      document.body?.classList.contains('is-mobile-device') ||
++      Boolean((window as any).__WEBGAL_DEVICE_INFO__?.isMobile));
++  let size = isMobile ? 18 : 42;
++  let fontSize = isMobile ? '125%' : (isFr ? '125%' : '150%');
++  if (!isMobile && isFr) {
+     fontSize = '125%';
+     size = 40;
+   }
+   const { isSupported: isFullscreenSupport, isFullScreen, toggle: toggleFullscreen } = useFullScreen();
+   const GUIStore = useSelector((state: RootState) => state.GUI);
+   const enableFlowchart = useSelector((state: RootState) => state.userData.globalGameVar.Enable_flowchart === true);
++  const enableDiscStatus = useSelector((state: RootState) => state.userData.globalGameVar.Enable_disc_status === true);
+   const stageState = useStageState();
+   const dispatch = useDispatch();
+   const setComponentVisibility = (component: keyof componentsVisibility, visibility: boolean) => {
+@@ -81,11 +91,29 @@ export const BottomControlPanel = () => {
+     );
+   }
+ 
+-  return (
++  const showMobileControls = isMobile && !GUIStore.showTitle && !GUIStore.showMenuPanel &&
++    !GUIStore.showBacklog && !GUIStore.showGlobalDialog && !GUIStore.showMangaReader &&
++    !GUIStore.showPanicOverlay && !GUIStore.showExtra && !stageState.isDisableTextbox;
++  const [collapsed, setCollapsed] = useState(isMobile);
++  const showPanel = GUIStore.showTextBox && stageState.enableFilm === '' &&
++    (isMobile ? showMobileControls : GUIStore.controlsVisibility);
++
++  const panel = (
+     // <div className={styles.ToCenter}>
+     <>
+-      {GUIStore.showTextBox && stageState.enableFilm === '' && (
+-        <div className={styles.main} style={{ visibility: GUIStore.controlsVisibility ? 'visible' : 'hidden' }}>
++      {showPanel && (collapsed ? (
++        <div className={`${styles.main} ${styles.collapsed}`}>
++          <button className={styles.menuToggle} aria-expanded={false} onClick={() => setCollapsed(false)}>
++            <HamburgerButton className={styles.button} size={size} aria-hidden />
++            <span>菜单</span>
++          </button>
++        </div>
++      ) : (
++        <div className={styles.main}>
++          <button className={styles.menuToggle} aria-expanded={true} onClick={() => setCollapsed(true)}>
++            <DoubleDown className={styles.button} size={size} aria-hidden />
++            <span>收起</span>
++          </button>
+           {GUIStore.showTextBox && (
+             <span
+               className={styles.singleButton}
+@@ -166,6 +194,30 @@ export const BottomControlPanel = () => {
+               <span className={styles.button_text}>{t('buttons.flowchart')}</span>
+             </span>
+           )}
++          {enableDiscStatus && (
++            <span
++              className={styles.singleButton}
++              style={{ fontSize }}
++              role="button"
++              aria-label="状态"
++              tabIndex={0}
++              onClick={() => {
++                setMenuPanel(MenuPanelTag.DiscStatus);
++                setComponentVisibility('showMenuPanel', true);
++                playSeClick();
++              }}
++              onKeyDown={(event) => {
++                if (event.key === 'Enter' || event.key === ' ') {
++                  event.preventDefault();
++                  event.currentTarget.click();
++                }
++              }}
++              onMouseEnter={playSeEnter}
++            >
++              <ChartHistogram className={styles.button} theme="outline" size={size} fill="#f5f5f7" strokeWidth={strokeWidth} />
++              <span className={styles.button_text}>状态</span>
++            </span>
++          )}
+           <span
+             className={styles.singleButton}
+             style={{ fontSize }}
+@@ -352,7 +404,7 @@ export const BottomControlPanel = () => {
+               <span className={styles.button_text}>{t('buttons.fullscreen')}</span>
+             </span>
+           )}
+-          <span
++          {!isMobile && <span
+             className={styles.singleButton}
+             style={{ fontSize }}
+             onClick={() => {
+@@ -366,10 +418,11 @@ export const BottomControlPanel = () => {
+             ) : (
+               <Unlock className={styles.button} theme="outline" size={size} fill="#f5f5f7" strokeWidth={strokeWidth} />
+             )}
+-          </span>
++          </span>}
+         </div>
+-      )}
++      ))}
+     </>
+     // </div>
+   );
++  return isMobile ? createPortal(panel, document.body) : panel;
+ };
+diff --git a/packages/webgal/src/UI/BottomControlPanel/bottomControlPanel.module.scss b/packages/webgal/src/UI/BottomControlPanel/bottomControlPanel.module.scss
+index c9c63ae..7db55c2 100644
+--- a/packages/webgal/src/UI/BottomControlPanel/bottomControlPanel.module.scss
++++ b/packages/webgal/src/UI/BottomControlPanel/bottomControlPanel.module.scss
+@@ -31,43 +31,74 @@
+ }
+ 
+ .button {
+-  position: relative;
+-  top: 2px;
+-  padding: 0 0 0 0;
++  display: grid;
++  place-items: center;
++  flex-shrink: 0;
+   filter: drop-shadow(1px 1px 5px rgba(0, 0, 0, 1));
++
++  svg { display: block; }
+ }
+ 
+ .button_text {
+-  position: relative;
+-  bottom: 8px;
+   color: white;
+   text-shadow: 1px 1px 5px rgba(0, 0, 0, 1);
+-  padding-left: 3px;
++  line-height: 1;
++  white-space: nowrap !important;
++}
++
++.menuToggle {
++  align-self: center;
++  display: inline-flex;
++  justify-content: center;
++  align-items: center;
++  gap: 6px;
++  border: 0;
++  border-radius: 6px;
++  color: #fff;
++  background: #1b202ce8;
++  padding: 0.35em;
++  font: inherit;
++  cursor: pointer;
++  white-space: nowrap;
++
++  .button {
++    position: static;
++    display: grid;
++    place-items: center;
++  }
+ }
+ 
+ .button_on {
+   height: 100%;
+-  display: inline-block;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 3px;
+   font-size: 150%;
+-  padding: 0.25em 0.3em 0 0.15em;
++  padding: 0 0.3em;
+   transition: background-color 0.5s;
+   background: rgba(255, 255, 255, 0.3);
+   border-radius: 4px;
+   margin: 0 0.1em 0 0.1em;
++  white-space: nowrap !important;
+ }
+ 
+ .singleButton {
+   //border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+   height: 100%;
+-  display: inline-block;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 3px;
+   color: white;
+   font-size: 150%;
+-  padding: 0.3em 0.3em 0 0.15em;
++  padding: 0 0.3em;
+   transition: background-color 0.5s;
+   cursor: pointer;
+   border-radius: 4px;
+   margin: 0 0.1em 0 0.1em;
+   position: relative;
++  white-space: nowrap !important;
+ }
+ 
+ .singleButton:hover, .singleButton_active {
+@@ -126,3 +157,96 @@
+   overflow: hidden;
+   padding: 0 0 0 0.5em;
+ }
++
++:global(.is-mobile-device) {
++  .main {
++    --toolbar-left: max(env(safe-area-inset-left, 0px), var(--android-toolbar-left, 0px));
++    --toolbar-right: max(env(safe-area-inset-right, 0px), var(--android-toolbar-right, 0px));
++    --toolbar-bottom: max(env(safe-area-inset-bottom, 0px), var(--android-toolbar-bottom, 0px));
++    position: fixed;
++    z-index: 25;
++    bottom: calc(8px + var(--toolbar-bottom));
++    left: calc((100% + var(--toolbar-left) - var(--toolbar-right)) / 2);
++    right: auto;
++    transform: translateX(-50%);
++    width: max-content;
++    max-width: calc(100vw - 16px - var(--toolbar-left) - var(--toolbar-right));
++    box-sizing: border-box;
++    height: auto;
++    min-height: 44px;
++    gap: 3px;
++    justify-content: flex-start;
++    overflow-x: auto;
++    overscroll-behavior-x: contain;
++    padding: 0 4px;
++    background: rgba(10, 14, 22, 0.92);
++    border: 1px solid rgba(255, 255, 255, 0.2);
++    border-radius: 12px;
++    font-size: 14px;
++    scrollbar-width: none;
++  }
++
++  .main::-webkit-scrollbar,
++  .fastSlPreview {
++    display: none;
++  }
++
++  .singleButton,
++  .button_on,
++  .menuToggle {
++    display: inline-flex;
++    align-items: center;
++    justify-content: center;
++    flex: 0 0 auto;
++    gap: 4px;
++    box-sizing: border-box;
++    min-width: 44px;
++    min-height: 44px;
++    padding: 0 8px;
++    margin: 0;
++    font-size: 14px !important;
++    touch-action: pan-x;
++  }
++
++  .button,
++  .button_text {
++    position: static;
++    padding: 0;
++    margin: 0;
++    line-height: 1;
++  }
++
++  .button {
++    display: grid;
++    place-items: center;
++
++    svg { display: block; }
++  }
++
++  .menuToggle {
++    position: sticky;
++    left: 0;
++    z-index: 1;
++    background: #242b37;
++  }
++
++  .collapsed {
++    left: auto;
++    right: calc(8px + var(--toolbar-right));
++    transform: none;
++    padding: 0;
++    background: transparent;
++    border-color: transparent;
++
++    .menuToggle {
++      background: transparent;
++      color: rgba(255, 255, 255, 0.74);
++      text-shadow: 0 1px 6px #000d;
++
++      &:active, &:focus-visible {
++        color: #fff;
++        background: #17171b55;
++      }
++    }
++  }
++}
+diff --git a/packages/webgal/src/UI/Extra/CollectionNotice.tsx b/packages/webgal/src/UI/Extra/CollectionNotice.tsx
+new file mode 100644
+index 0000000..fc364c2
+--- /dev/null
++++ b/packages/webgal/src/UI/Extra/CollectionNotice.tsx
+@@ -0,0 +1,40 @@
++import { useEffect, useState } from 'react';
++import { createPortal } from 'react-dom';
++import styles from './collectionNotice.module.scss';
++
++interface UnlockNotice {
++  kind: 'cg' | 'bgm';
++  name: string;
++}
++
++export default function CollectionNotice() {
++  const [notices, setNotices] = useState<UnlockNotice[]>([]);
++  const current = notices[0];
++
++  useEffect(() => {
++    const addNotice = (event: Event) => {
++      const { detail } = event as CustomEvent<UnlockNotice>;
++      setNotices((queue) => [...queue, detail]);
++    };
++    window.addEventListener('webgal:collection-unlocked', addNotice);
++    return () => window.removeEventListener('webgal:collection-unlocked', addNotice);
++  }, []);
++
++  useEffect(() => {
++    if (!current) return;
++    const timer = window.setTimeout(() => setNotices((queue) => queue.slice(1)), 3200);
++    return () => window.clearTimeout(timer);
++  }, [current]);
++
++  return createPortal(
++    <div className={styles.host} role="status">
++      {current && (
++        <div className={styles.notice} key={current.name}>
++          <strong>{current.kind === 'cg' ? 'CG 已收录' : '音乐已收录'}</strong>
++          <span>{current.name}</span>
++        </div>
++      )}
++    </div>,
++    document.body,
++  );
++}
+diff --git a/packages/webgal/src/UI/Extra/ExtraCgElement.tsx b/packages/webgal/src/UI/Extra/ExtraCgElement.tsx
+index 7ad92eb..83d220e 100644
+--- a/packages/webgal/src/UI/Extra/ExtraCgElement.tsx
++++ b/packages/webgal/src/UI/Extra/ExtraCgElement.tsx
+@@ -22,6 +22,9 @@ export function ExtraCgElement(props: IProps) {
+   const { playSeEnter, playSeClick } = useSoundEffect();
+   const previewResource = props.resources[0];
+   const currentResource = props.resources[currentResourceIndex] ?? previewResource;
++  // 列表用缩略图，全屏预览仍用原图；视频没有缩略图概念，直接用原文件
++  const thumbOf = (resource: IAppreciationAsset) =>
++    resource.thumb && !isVideoFile(resource.url) ? resource.thumb : resource.url;
+ 
+   // Determine if the resource is a video based on file extension
+   const isVideo = useMemo(() => {
+@@ -142,12 +145,12 @@ export function ExtraCgElement(props: IProps) {
+                 style={getStackItemStyle(index, stackResources.length)}
+                 key={`${resource.url}_${index}`}
+               >
+-                {renderMedia(resource.url)}
++                {renderMedia(thumbOf(resource))}
+               </div>
+             ))}
+           </>
+         ) : (
+-          renderMedia(previewResource.url)
++          renderMedia(thumbOf(previewResource))
+         )}
+       </div>
+     </>
+diff --git a/packages/webgal/src/UI/Extra/collectionNotice.module.scss b/packages/webgal/src/UI/Extra/collectionNotice.module.scss
+new file mode 100644
+index 0000000..1cdc3dd
+--- /dev/null
++++ b/packages/webgal/src/UI/Extra/collectionNotice.module.scss
+@@ -0,0 +1,26 @@
++.host {
++  position: fixed;
++  top: calc(12px + env(safe-area-inset-top, 0px));
++  right: calc(12px + env(safe-area-inset-right, 0px));
++  z-index: 40;
++  pointer-events: none;
++}
++
++.notice {
++  display: grid;
++  gap: 4px;
++  max-width: min(310px, calc(100vw - 44px));
++  padding: 10px 16px;
++  background: #121b28;
++  border: 1px solid #3c536a;
++  border-inline-start: 3px solid #7cc4ef;
++  border-radius: 8px;
++  color: #f5f6fa;
++  font-size: 14px;
++  box-shadow: 0 3px 12px #0007;
++  overflow-wrap: anywhere;
++
++  strong {
++    color: #a6dafa;
++  }
++}
+diff --git a/packages/webgal/src/UI/Flowchart/Flowchart.tsx b/packages/webgal/src/UI/Flowchart/Flowchart.tsx
+index 4e88674..458ca02 100644
+--- a/packages/webgal/src/UI/Flowchart/Flowchart.tsx
++++ b/packages/webgal/src/UI/Flowchart/Flowchart.tsx
+@@ -214,10 +214,12 @@ export const Flowchart = () => {
+                 return (
+                   <g
+                     key={node.id}
++                    data-flowchart-node={node.id}
+                     className={`${styles.flowchart_node} ${
+                       unlocked ? styles.flowchart_node_unlocked : styles.flowchart_node_locked
+                     }`}
+                     role={unlocked ? 'button' : undefined}
++                    aria-label={labelText || t('locked')}
+                     tabIndex={unlocked ? 0 : -1}
+                     onClick={() => unlocked && jumpToNode(node)}
+                     onKeyDown={(event) => {
+diff --git a/packages/webgal/src/UI/MangaReader/MangaReader.tsx b/packages/webgal/src/UI/MangaReader/MangaReader.tsx
+new file mode 100644
+index 0000000..bcba0a7
+--- /dev/null
++++ b/packages/webgal/src/UI/MangaReader/MangaReader.tsx
+@@ -0,0 +1,770 @@
++import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
++import ReactDOM from 'react-dom';
++import { useDispatch, useSelector } from 'react-redux';
++import { RootState } from '@/store/store';
++import { setVisibility } from '@/store/GUIReducer';
++import styles from './mangaReader.module.scss';
++
++interface PageMeta {
++  file: string;
++  width: number;
++  height: number;
++}
++
++interface VolumeMeta {
++  id: number;
++  title: string;
++  pages: PageMeta[];
++}
++
++const MANGA_ROOT = './game/manga';
++
++interface BookmarkItem {
++  id: string;
++  vol: number;
++  page: number;
++  time: string;
++}
++
++// 检查是否为移动端/手机设备
++const isMobileDevice = (): boolean => {
++  if (typeof window === 'undefined') return false;
++  const ua = navigator.userAgent || '';
++  const mobileUA = /Android|iPhone|iPad|iPod|Mobile|Silk|BlackBerry|Opera Mini/i.test(ua);
++  const touchCapable = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
++  const coarsePointer = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
++  return mobileUA || (touchCapable && coarsePointer) || window.innerWidth < 768;
++};
++
++export const MangaReader: React.FC = () => {
++  const dispatch = useDispatch();
++  const isOpen = useSelector((state: RootState) => state.GUI.showMangaReader);
++  const unlockedMusic = useSelector((state: RootState) => state.userData.appreciationData.bgm);
++  const musicVolume = useSelector(({ userData }: RootState) =>
++    (userData.optionData.volumeMain * userData.optionData.bgmVolume) / 10000,
++  );
++
++  const [volumes, setVolumes] = useState<VolumeMeta[] | null>(null);
++  const [catalogError, setCatalogError] = useState(false);
++  const [historyReady, setHistoryReady] = useState(false);
++  const [currentVol, setCurrentVol] = useState<number>(1);
++  const [currentPage, setCurrentPage] = useState<number>(1);
++  // 手机端强制竖屏（无论设备旋转角度，手机漫画只要竖屏）
++  const [isPortrait, setIsPortrait] = useState<boolean>(() => {
++    if (typeof window === 'undefined') return false;
++    if (isMobileDevice()) return true;
++    return window.innerHeight > window.innerWidth || window.innerWidth < 768;
++  });
++  const [showBars, setShowBars] = useState<boolean>(true);
++  const [activeDrawer, setActiveDrawer] = useState<'none' | 'volume' | 'bookmark' | 'music'>('none');
++  const [musicTrack, setMusicTrack] = useState('');
++  const [musicError, setMusicError] = useState(false);
++  const musicPlayer = useRef<HTMLAudioElement | null>(null);
++  const attachMusicPlayer = useCallback((player: HTMLAudioElement | null) => {
++    if (!player) musicPlayer.current?.pause();
++    musicPlayer.current = player;
++  }, []);
++
++  useEffect(() => {
++    if (musicPlayer.current) musicPlayer.current.volume = musicVolume;
++  }, [musicVolume]);
++
++  useEffect(() => {
++    if (!isOpen) {
++      setMusicTrack('');
++      setMusicError(false);
++    }
++  }, [isOpen]);
++
++  const playMusic = (url: string) => {
++    const player = musicPlayer.current;
++    if (!player) return;
++    setMusicError(false);
++    setMusicTrack(url);
++    player.volume = musicVolume;
++    player.src = url;
++    void player.play().catch(() => {
++      if (player !== musicPlayer.current || player.getAttribute('src') !== url) return;
++      setMusicTrack('');
++      setMusicError(true);
++    });
++  };
++
++  const stopMusic = () => {
++    musicPlayer.current?.pause();
++    musicPlayer.current?.removeAttribute('src');
++    musicPlayer.current?.load();
++    setMusicTrack('');
++    setMusicError(false);
++  };
++  const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
++  const [historyPrompt, setHistoryPrompt] = useState<{ vol: number; page: number } | null>(null);
++
++  // 漫画缩放与平移状态（双指捏合缩放、双击放大、放大后拖拽漫游）
++  const [scale, setScale] = useState<number>(1.0);
++  const [translate, setTranslate] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
++
++  const isPinchingRef = useRef<boolean>(false);
++  const initialPinchDistRef = useRef<number>(0);
++  const initialScaleRef = useRef<number>(1.0);
++  const lastTapTimeRef = useRef<number>(0);
++  const panStartRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
++
++  const resetZoom = useCallback(() => {
++    setScale(1.0);
++    setTranslate({ x: 0, y: 0 });
++  }, []);
++
++  const audioCtxRef = useRef<AudioContext | null>(null);
++  const touchStartXRef = useRef<number | null>(null);
++  const touchStartYRef = useRef<number | null>(null);
++
++  // 监听窗口尺寸：手机端恒定锁定为竖屏
++  useEffect(() => {
++    const handleResize = () => {
++      if (isMobileDevice()) {
++        setIsPortrait(true);
++        return;
++      }
++      const portrait = window.innerHeight > window.innerWidth || window.innerWidth < 768;
++      setIsPortrait(portrait);
++    };
++    window.addEventListener('resize', handleResize);
++    window.addEventListener('orientationchange', handleResize);
++    return () => {
++      window.removeEventListener('resize', handleResize);
++      window.removeEventListener('orientationchange', handleResize);
++    };
++  }, []);
++
++  // 手机端尝试锁定物理屏幕为竖屏
++  useEffect(() => {
++    if (!isOpen) return;
++    if (isMobileDevice()) {
++      try {
++        const screenAny = window.screen as any;
++        if (screenAny?.orientation?.lock) {
++          screenAny.orientation.lock('portrait').catch(() => {});
++        }
++      } catch {}
++      try {
++        (window as any).AndroidBridge?.setOrientation('portrait');
++      } catch {}
++    }
++    return () => {
++      try {
++        const screenAny = window.screen as any;
++        if (screenAny?.orientation?.unlock) {
++          screenAny.orientation.unlock();
++        }
++      } catch {}
++      try {
++        (window as any).AndroidBridge?.setOrientation('landscape');
++      } catch {}
++    };
++  }, [isOpen]);
++
++  // Web Audio 触感提示音
++  const playClickSound = useCallback(() => {
++    try {
++      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
++      if (!audioCtxRef.current && AudioCtx) {
++        audioCtxRef.current = new AudioCtx();
++      }
++      if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
++        audioCtxRef.current.resume();
++      }
++      if (audioCtxRef.current) {
++        const ctx = audioCtxRef.current;
++        const osc = ctx.createOscillator();
++        const gain = ctx.createGain();
++        osc.type = 'sine';
++        osc.frequency.setValueAtTime(880, ctx.currentTime);
++        osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.04);
++        gain.gain.setValueAtTime(0.06, ctx.currentTime);
++        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
++        osc.connect(gain);
++        gain.connect(ctx.destination);
++        osc.start();
++        osc.stop(ctx.currentTime + 0.04);
++      }
++    } catch {
++      // 忽略音频受阻
++    }
++  }, []);
++
++  const currentVolMeta = useMemo(() => {
++    return volumes?.find((volume) => volume.id === currentVol);
++  }, [currentVol, volumes]);
++
++  const maxAvailablePage = currentVolMeta?.pages.length ?? 0;
++
++  useEffect(() => {
++    if (!isOpen || volumes) return;
++    const controller = new AbortController();
++    setCatalogError(false);
++    void fetch(`${MANGA_ROOT}/manifest.json`, { signal: controller.signal })
++      .then(async response => {
++        if (!response.ok) throw new Error(`漫画目录读取失败 (${response.status})`);
++        const catalog = await response.json();
++        if (catalog.version !== 1 || !Array.isArray(catalog.volumes) || !catalog.volumes.length) {
++          throw new Error('漫画目录格式错误');
++        }
++        setVolumes(catalog.volumes);
++      })
++      .catch(() => {
++        if (!controller.signal.aborted) setCatalogError(true);
++      });
++    return () => controller.abort();
++  }, [isOpen, volumes]);
++
++  // 从本地加载书签与续读历史（移除旧方向偏好读取）
++  useEffect(() => {
++    if (!isOpen) {
++      setHistoryReady(false);
++      return;
++    }
++    if (!volumes) return;
++    try {
++      const savedBm = localStorage.getItem('webgal_manga_bookmarks');
++      if (savedBm) {
++        setBookmarks(JSON.parse(savedBm));
++      }
++      const savedHist = localStorage.getItem('webgal_manga_history');
++      if (savedHist) {
++        const h = JSON.parse(savedHist);
++        const volume = volumes.find(v => v.id === h?.vol);
++        if (volume && Number.isInteger(h.page) && h.page >= 1 && h.page <= volume.pages.length) {
++          setHistoryPrompt(h.vol === currentVol && h.page === currentPage ? null : { vol: h.vol, page: h.page });
++        }
++      }
++    } catch (e) {
++      console.warn('Failed to load manga local state:', e);
++    } finally {
++      setHistoryReady(true);
++    }
++  }, [isOpen, volumes]);
++
++  // 翻页持久化
++  useEffect(() => {
++    if (!isOpen || !historyReady || historyPrompt || !maxAvailablePage) return;
++    try {
++      localStorage.setItem('webgal_manga_history', JSON.stringify({ vol: currentVol, page: currentPage, time: Date.now() }));
++    } catch {
++      // 忽略
++    }
++  }, [isOpen, currentVol, currentPage, historyReady, historyPrompt, maxAvailablePage]);
++
++  const closeReader = useCallback(() => {
++    playClickSound();
++    setActiveDrawer('none');
++    dispatch(setVisibility({ component: 'showMangaReader', visibility: false }));
++  }, [dispatch, playClickSound]);
++
++  const isCover = currentPage === 1;
++
++  // 单页翻页逻辑：next 逐页进入下一页，prev 逐页回上一页
++  const navigate = useCallback((direction: 'next' | 'prev') => {
++    playClickSound();
++    setHistoryPrompt(null);
++    resetZoom();
++    setCurrentPage((prev) => {
++      if (direction === 'next') {
++        return prev < maxAvailablePage ? prev + 1 : prev;
++      } else {
++        return prev > 1 ? prev - 1 : prev;
++      }
++    });
++  }, [maxAvailablePage, playClickSound, resetZoom]);
++
++  // 键盘快捷键监听：点右方向键为下一页，左方向键为上一页，移除 M 快捷键
++  useEffect(() => {
++    if (!isOpen) return;
++    const handleKeyDown = (e: KeyboardEvent) => {
++      if (e.key === 'Escape') {
++        if (activeDrawer !== 'none') {
++          setActiveDrawer('none');
++        } else {
++          closeReader();
++        }
++      } else if (e.key === 'ArrowRight') {
++        navigate('next');
++      } else if (e.key === 'ArrowLeft') {
++        navigate('prev');
++      }
++    };
++    window.addEventListener('keydown', handleKeyDown);
++    return () => window.removeEventListener('keydown', handleKeyDown);
++  }, [isOpen, activeDrawer, closeReader, navigate]);
++
++  // 触摸手势处理：双指捏合缩放 (Pinch)、双击 2.2x 放大/复位、单指轻扫翻页或放大漫游
++  const handleTouchStart = (e: React.TouchEvent) => {
++    if ((e.target as HTMLElement).closest(`.${styles.topBar}, .${styles.bottomBar}, .${styles.drawer}, .${styles.historyToast}`)) {
++      return;
++    }
++    if (e.touches.length === 2) {
++      isPinchingRef.current = true;
++      const t1 = e.touches[0];
++      const t2 = e.touches[1];
++      initialPinchDistRef.current = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
++      initialScaleRef.current = scale;
++      touchStartXRef.current = null;
++      touchStartYRef.current = null;
++      panStartRef.current = null;
++    } else if (e.touches.length === 1) {
++      isPinchingRef.current = false;
++      const t = e.touches[0];
++      touchStartXRef.current = t.clientX;
++      touchStartYRef.current = t.clientY;
++      if (scale > 1.05) {
++        panStartRef.current = {
++          x: t.clientX,
++          y: t.clientY,
++          tx: translate.x,
++          ty: translate.y,
++        };
++      } else {
++        panStartRef.current = null;
++      }
++    }
++  };
++
++  const handleTouchMove = (e: React.TouchEvent) => {
++    if (e.touches.length === 2 && isPinchingRef.current) {
++      const t1 = e.touches[0];
++      const t2 = e.touches[1];
++      const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
++      if (initialPinchDistRef.current > 0) {
++        const factor = dist / initialPinchDistRef.current;
++        let nextScale = initialScaleRef.current * factor;
++        nextScale = Math.min(Math.max(nextScale, 1.0), 3.5);
++        setScale(nextScale);
++        if (nextScale <= 1.05) {
++          setTranslate({ x: 0, y: 0 });
++        }
++      }
++    } else if (e.touches.length === 1 && scale > 1.05 && panStartRef.current) {
++      const t = e.touches[0];
++      const dx = t.clientX - panStartRef.current.x;
++      const dy = t.clientY - panStartRef.current.y;
++      const maxTx = (window.innerWidth * (scale - 1)) / 2 + 60;
++      const maxTy = (window.innerHeight * (scale - 1)) / 2 + 80;
++      const nextTx = Math.min(Math.max(panStartRef.current.tx + dx, -maxTx), maxTx);
++      const nextTy = Math.min(Math.max(panStartRef.current.ty + dy, -maxTy), maxTy);
++      setTranslate({ x: nextTx, y: nextTy });
++    }
++  };
++
++  const handleTouchEnd = (e: React.TouchEvent) => {
++    if (isPinchingRef.current) {
++      if (e.touches.length < 2) {
++        isPinchingRef.current = false;
++        if (scale <= 1.08) {
++          resetZoom();
++        }
++      }
++      return;
++    }
++
++    const now = Date.now();
++    const timeDiff = now - lastTapTimeRef.current;
++    if (timeDiff < 280 && timeDiff > 30) {
++      lastTapTimeRef.current = 0;
++      if (scale > 1.15) {
++        resetZoom();
++      } else {
++        setScale(2.2);
++        setTranslate({ x: 0, y: 0 });
++      }
++      touchStartXRef.current = null;
++      touchStartYRef.current = null;
++      panStartRef.current = null;
++      return;
++    }
++    lastTapTimeRef.current = now;
++
++    if (scale <= 1.05 && touchStartXRef.current !== null && touchStartYRef.current !== null && e.changedTouches.length > 0) {
++      const diffX = e.changedTouches[0].clientX - touchStartXRef.current;
++      const diffY = e.changedTouches[0].clientY - touchStartYRef.current;
++      if (Math.abs(diffX) > 40 && Math.abs(diffX) > Math.abs(diffY)) {
++        if (diffX < 0) {
++          navigate('next');
++        } else {
++          navigate('prev');
++        }
++      }
++    }
++    touchStartXRef.current = null;
++    touchStartYRef.current = null;
++    panStartRef.current = null;
++  };
++
++  // 书签操作
++  const isBookmarked = useMemo(() => {
++    return bookmarks.some((b) => b.vol === currentVol && b.page === currentPage);
++  }, [bookmarks, currentVol, currentPage]);
++
++  const toggleBookmark = useCallback(() => {
++    playClickSound();
++    setBookmarks((prev) => {
++      let updated: BookmarkItem[];
++      if (isBookmarked) {
++        updated = prev.filter((b) => !(b.vol === currentVol && b.page === currentPage));
++      } else {
++        const newItem: BookmarkItem = {
++          id: `${currentVol}_${currentPage}_${Date.now()}`,
++          vol: currentVol,
++          page: currentPage,
++          time: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString().slice(0, 5),
++        };
++        updated = [newItem, ...prev];
++      }
++      try {
++        localStorage.setItem('webgal_manga_bookmarks', JSON.stringify(updated));
++      } catch {
++        // 忽略
++      }
++      return updated;
++    });
++  }, [isBookmarked, currentVol, currentPage, playClickSound]);
++
++  const deleteBookmark = useCallback((id: string, e: React.MouseEvent) => {
++    e.stopPropagation();
++    playClickSound();
++    setBookmarks((prev) => {
++      const updated = prev.filter((b) => b.id !== id);
++      try {
++        localStorage.setItem('webgal_manga_bookmarks', JSON.stringify(updated));
++      } catch {
++        // 忽略
++      }
++      return updated;
++    });
++  }, [playClickSound]);
++
++  if (!isOpen) return null;
++
++  if (!volumes || !currentVolMeta || !maxAvailablePage) {
++    return ReactDOM.createPortal(
++      <div className={`${styles.readerOverlay} ${isPortrait ? styles.forcePortrait : ''}`}>
++        <div role="status" className={styles.emptyDrawerTip}>
++          <p>{catalogError ? '无法读取漫画目录。' : '正在读取漫画目录…'}</p>
++          <button className={styles.wgBtn} onClick={closeReader}>返回游戏</button>
++        </div>
++      </div>,
++      document.body
++    );
++  }
++
++  const getPageUrl = (page: number) =>
++    `${MANGA_ROOT}/vol_${String(currentVol).padStart(2, '0')}/${currentVolMeta.pages[page - 1].file}`;
++
++  const goToPage = (vol: number, page: number) => {
++    const volume = volumes.find(item => item.id === vol);
++    if (!volume || !Number.isInteger(page) || page < 1 || page > volume.pages.length) return;
++    resetZoom();
++    setCurrentVol(vol);
++    setCurrentPage(page);
++    setHistoryPrompt(null);
++    setActiveDrawer('none');
++  };
++
++  return ReactDOM.createPortal(
++    <div
++      className={`${styles.readerOverlay} ${isPortrait ? styles.forcePortrait : ''}`}
++      onTouchStart={handleTouchStart}
++      onTouchMove={handleTouchMove}
++      onTouchEnd={handleTouchEnd}
++    >
++      <div className={`${styles.readerApp} ${showBars ? '' : styles.immersive}`}>
++        <audio ref={attachMusicPlayer} loop preload="none" />
++        {/* Top Header Bar */}
++        <div className={`${styles.topBar} ${!showBars ? styles.topBarHidden : ''}`}>
++          {/* 左侧：返回按钮与卷目下拉触发器 */}
++          <div className={styles.topLeft}>
++            <button
++              className={`${styles.wgBtn} ${styles.backBtn}`}
++              onClick={closeReader}
++              title="返回游戏主菜单"
++            >
++              <svg viewBox="0 0 24 24">
++                <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
++              </svg>
++              <span>返回</span>
++            </button>
++
++            <button
++              className={`${styles.wgBtn} ${activeDrawer === 'volume' ? styles.activeBtn : ''}`}
++              onClick={() => {
++                playClickSound();
++                setActiveDrawer((d) => (d === 'volume' ? 'none' : 'volume'));
++              }}
++              title="展开上方卷目菜单"
++            >
++              <svg viewBox="0 0 24 24">
++                <path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z" />
++              </svg>
++              <span>卷目 ▾</span>
++            </button>
++          </div>
++
++            <div
++              className={styles.titleBox}
++              onClick={() => {
++                playClickSound();
++                setActiveDrawer((d) => (d === 'volume' ? 'none' : 'volume'));
++              }}
++              title="点击在上方展开卷目菜单"
++            >
++              <div className={styles.mainTitle}>{currentVolMeta.title}</div>
++              <div className={styles.subTitle}>
++                第 {currentPage} 页 {isCover ? '(封面)' : ''} / 共 {maxAvailablePage} 页
++              </div>
++            </div>
++
++          {/* 右侧：书签功能，移除方向切换和单双页切换 */}
++          <div className={styles.topRight}>
++            <button
++              className={`${styles.wgBtn} ${isBookmarked ? styles.activeBtn : ''}`}
++              onClick={toggleBookmark}
++              title="将当前页加入书签"
++            >
++              <svg viewBox="0 0 24 24">
++                <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2Z" />
++              </svg>
++              <span className={styles.btnLabelDesktop}>{isBookmarked ? '已书签' : '存书签'}</span>
++            </button>
++
++            <button
++              className={`${styles.wgBtn} ${activeDrawer === 'bookmark' ? styles.activeBtn : ''}`}
++              onClick={() => {
++                playClickSound();
++                setActiveDrawer((d) => (d === 'bookmark' ? 'none' : 'bookmark'));
++              }}
++              title="查看已存书签"
++            >
++              <svg viewBox="0 0 24 24">
++                <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
++              </svg>
++              <span className={styles.btnLabelDesktop}>书签夹</span>
++            </button>
++            <button
++              type="button"
++              className={`${styles.wgBtn} ${activeDrawer === 'music' || musicTrack ? styles.activeBtn : ''}`}
++              onClick={() => setActiveDrawer((drawer) => drawer === 'music' ? 'none' : 'music')}
++              aria-expanded={activeDrawer === 'music'}
++            >
++              <svg viewBox="0 0 24 24" aria-hidden="true">
++                <path d="M9 18a3 3 0 1 1-2-2.83V6l12-3v12a3 3 0 1 1-2-2.83V8L9 10v8Z" />
++              </svg>
++              <span>音乐</span>
++            </button>
++          </div>
++        </div>
++
++        {/* History Resume Toast */}
++        {historyPrompt && (
++          <div className={styles.historyToast}>
++            <span>上次读到：第 {historyPrompt.vol} 卷 第 {historyPrompt.page} 页</span>
++            <button
++              className={styles.historyBtn}
++              onClick={() => {
++                playClickSound();
++                goToPage(historyPrompt.vol, historyPrompt.page);
++              }}
++            >
++              继续阅读
++            </button>
++            <span className={styles.toastClose} onClick={() => setHistoryPrompt(null)}>✕</span>
++          </div>
++        )}
++
++        {/* Navigation Click Zones: 缩放状态下禁用点击防误触，1.0x 状态下左侧上一页，右侧下一页 */}
++        <div
++          className={styles.zoneLeft}
++          style={{ pointerEvents: scale > 1.05 ? 'none' : 'auto' }}
++          onClick={() => navigate('prev')}
++          title="点击向左 (上一页)"
++        />
++        <div
++          className={styles.zoneMid}
++          style={{ pointerEvents: scale > 1.05 ? 'none' : 'auto' }}
++          onClick={() => setShowBars((b) => !b)}
++          title="点击中央开关控制工具栏"
++        />
++        <div
++          className={styles.zoneRight}
++          style={{ pointerEvents: scale > 1.05 ? 'none' : 'auto' }}
++          onClick={() => navigate('next')}
++          title="点击向右 (下一页)"
++        />
++
++        {/* Viewport for Pages: 横竖屏统一单页显示，支持手势缩放和平移漫游 */}
++        <div className={`${styles.viewport} ${isPortrait ? styles.viewportPortrait : ''}`}>
++          <div
++            className={styles.spreadContainer}
++            style={{
++              transform: `translate3d(${translate.x}px, ${translate.y}px, 0) scale(${scale})`,
++              transformOrigin: 'center center',
++              transition: isPinchingRef.current || panStartRef.current ? 'none' : 'transform 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
++              willChange: 'transform',
++            }}
++          >
++            <img
++              className={`${styles.mangaPage} ${isPortrait ? styles.mangaPagePortrait : ''}`}
++              src={getPageUrl(currentPage)}
++              alt={`Page ${currentPage}`}
++              draggable={false}
++            />
++          </div>
++        </div>
++
++        {/* Bottom Floating Pill Bar: 进度条逐页移动 */}
++        <div className={`${styles.bottomBar} ${!showBars ? styles.bottomBarHidden : ''}`}>
++          <div className={styles.sliderRow}>
++            <input
++              type="range"
++              aria-label="跳转页码"
++              className={styles.pageSlider}
++              min={1}
++              max={maxAvailablePage}
++              step={1}
++              value={currentPage}
++              onChange={(e) => {
++                setHistoryPrompt(null);
++                resetZoom();
++                setCurrentPage(Number(e.target.value));
++              }}
++            />
++            <div className={styles.pageIndicator}>
++              {currentPage} / {maxAvailablePage}
++            </div>
++          </div>
++        </div>
++
++        {/* Drawers Overlay */}
++        {activeDrawer !== 'none' && (
++          <div className={styles.drawerOverlay} onClick={() => setActiveDrawer('none')} />
++        )}
++
++        {/* Volume Switcher Top Dropdown Panel (上方卷目菜单) */}
++        <div
++          className={`${styles.drawer} ${styles.drawerTop}`}
++          hidden={activeDrawer !== 'volume'}
++        >
++          <div className={styles.drawerHeader}>
++            <div className={styles.drawerHeaderTitle}>
++              <svg viewBox="0 0 24 24" className={styles.headerIcon}>
++                <path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z" />
++              </svg>
++              <span>卷目</span>
++            </div>
++            <button type="button" className={styles.drawerCloseBtn} onClick={() => setActiveDrawer('none')}>
++              ✕ 收起
++            </button>
++          </div>
++          <div className={styles.drawerBodyGrid}>
++            {volumes.map((vol) => {
++              const isSelected = vol.id === currentVol;
++              return (
++                <div
++                  key={vol.id}
++                  className={`${styles.volCard} ${isSelected ? styles.volCardActive : ''}`}
++                  onClick={() => {
++                    playClickSound();
++                    goToPage(vol.id, 1);
++                  }}
++                >
++                  <div className={styles.volNum}>{vol.id}</div>
++                  <div className={styles.volDetails}>
++                    <div className={styles.volName}>{vol.title}</div>
++                    <div className={styles.volProgressRow}>
++                      <span>共 {vol.pages.length} 页</span>
++                    </div>
++                  </div>
++                </div>
++              );
++            })}
++          </div>
++        </div>
++
++        {/* Bookmark Top Dropdown Panel (上方书签菜单) */}
++        <div
++          className={`${styles.drawer} ${styles.drawerTop}`}
++          hidden={activeDrawer !== 'bookmark'}
++        >
++          <div className={styles.drawerHeader}>
++            <div className={styles.drawerHeaderTitle}>
++              <svg viewBox="0 0 24 24" className={styles.headerIcon}>
++                <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
++              </svg>
++              <span>我的书签夹</span>
++            </div>
++            <button type="button" className={styles.drawerCloseBtn} onClick={() => setActiveDrawer('none')}>
++              ✕ 收起
++            </button>
++          </div>
++          <div className={styles.drawerBodyBookmark}>
++            {bookmarks.length === 0 ? (
++              <div className={styles.emptyDrawerTip}>暂无书签记录<br />阅读时点击顶栏“存书签”即可收录当前进度</div>
++            ) : (
++              bookmarks.map((bm) => (
++                <div
++                  key={bm.id}
++                  className={styles.bmCard}
++                  onClick={() => {
++                    playClickSound();
++                    goToPage(bm.vol, bm.page);
++                  }}
++                >
++                  <div>
++                    <div className={styles.bmTitle}>第 {bm.vol} 卷 · 第 {bm.page} 页</div>
++                    <div className={styles.bmTime}>{bm.time}</div>
++                  </div>
++                  <div
++                    className={styles.bmDelBtn}
++                    onClick={(e) => deleteBookmark(bm.id, e)}
++                    title="删除书签"
++                  >
++                    ✕ 删除
++                  </div>
++                </div>
++              ))
++            )}
++          </div>
++        </div>
++        {activeDrawer === 'music' && (
++          <section className={`${styles.drawer} ${styles.drawerTop}`} aria-label="阅读音乐">
++            <div className={styles.drawerHeader}>
++              <div className={styles.drawerHeaderTitle}>阅读音乐</div>
++              <button type="button" className={styles.drawerCloseBtn} onClick={() => setActiveDrawer('none')}>
++                关闭
++              </button>
++            </div>
++            <div className={styles.drawerBodyBookmark}>
++              {unlockedMusic.length === 0 ? (
++                <p className={styles.emptyDrawerTip}>在剧情中解锁的 BGM 会出现在这里。</p>
++              ) : (
++                <>
++                  <button type="button" className={styles.track} aria-pressed={!musicTrack} onClick={stopMusic}>
++                    静音阅读
++                  </button>
++                  {unlockedMusic.map(({ name, url }) => (
++                    <button key={url} type="button" className={styles.track}
++                      aria-pressed={musicTrack === url} onClick={() => playMusic(url)}>
++                      {name}
++                    </button>
++                  ))}
++                  {musicError && <p role="status" className={styles.emptyDrawerTip}>这首曲目无法播放。</p>}
++                </>
++              )}
++            </div>
++          </section>
++        )}
++      </div>
++    </div>,
++    document.body
++  );
++};
++
++export default MangaReader;
+diff --git a/packages/webgal/src/UI/MangaReader/mangaReader.module.scss b/packages/webgal/src/UI/MangaReader/mangaReader.module.scss
+new file mode 100644
+index 0000000..8ceadc7
+--- /dev/null
++++ b/packages/webgal/src/UI/MangaReader/mangaReader.module.scss
+@@ -0,0 +1,342 @@
++.readerOverlay {
++  --paper: #fbf5eb;
++  --ink: #2b2424;
++  --muted: #74635d;
++  --accent: #91374c;
++  --line: #ddcfc3;
++  --shelf-width: 760px;
++  position: fixed;
++  inset: 0;
++  z-index: 99999;
++  overflow: hidden;
++  color: var(--ink);
++  background: #211d1e;
++  font: 14px/1.45 "WebgalUI", sans-serif;
++  user-select: none;
++}
++
++.readerApp {
++  --reader-top: calc(58px + env(safe-area-inset-top, 0px));
++  --reader-bottom: calc(54px + env(safe-area-inset-bottom, 0px));
++  position: relative;
++  width: 100%;
++  height: 100%;
++}
++
++.topBar {
++  position: absolute;
++  inset: 0 0 auto;
++  z-index: 45;
++  display: grid;
++  grid-template-columns: 1fr minmax(0, 2fr) 1fr;
++  align-items: center;
++  gap: 12px;
++  box-sizing: border-box;
++  height: var(--reader-top);
++  padding: env(safe-area-inset-top, 0px) calc(16px + env(safe-area-inset-right, 0px))
++    0 calc(16px + env(safe-area-inset-left, 0px));
++  background: var(--paper);
++  border-bottom: 1px solid var(--line);
++  transition: transform 180ms ease;
++}
++
++.topBarHidden {
++  transform: translateY(-100%);
++  visibility: hidden;
++}
++
++.topLeft, .topRight {
++  display: flex;
++  align-items: center;
++  gap: 4px;
++  min-width: max-content;
++}
++
++.topRight { justify-content: flex-end; }
++
++.wgBtn, .drawerCloseBtn {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 6px;
++  min-height: 44px;
++  padding: 0 10px;
++  border: 0;
++  border-radius: 4px;
++  background: transparent;
++  color: inherit;
++  font: inherit;
++  white-space: nowrap;
++  cursor: pointer;
++
++  svg { width: 17px; height: 17px; flex: 0 0 auto; fill: currentColor; }
++  &:hover, &:focus-visible { background: #efe4da; }
++}
++
++.backBtn, .activeBtn { color: var(--accent); }
++.activeBtn { background: #f4e3e4; }
++
++.titleBox {
++  text-align: center;
++  min-width: 0;
++  cursor: pointer;
++}
++
++.mainTitle, .volName {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++  font-weight: 700;
++}
++.mainTitle { font-size: 15px; }
++.subTitle, .volProgressRow, .bmTime {
++  font-size: 12px;
++  color: var(--muted);
++  white-space: nowrap;
++}
++
++.zoneLeft, .zoneMid, .zoneRight {
++  position: absolute;
++  top: var(--reader-top);
++  bottom: var(--reader-bottom);
++  z-index: 10;
++  touch-action: none;
++}
++.zoneLeft, .zoneRight { width: 32%; cursor: pointer; }
++.zoneLeft { left: 0; }
++.zoneMid { left: 32%; width: 36%; }
++.zoneRight { right: 0; }
++
++.viewport {
++  display: grid;
++  place-items: center;
++  box-sizing: border-box;
++  width: 100%;
++  height: 100%;
++  overflow: hidden;
++  padding: calc(var(--reader-top) + 8px) calc(8px + env(safe-area-inset-right, 0px))
++    calc(var(--reader-bottom) + 8px) calc(8px + env(safe-area-inset-left, 0px));
++}
++.immersive {
++  --reader-top: env(safe-area-inset-top, 0px);
++  --reader-bottom: env(safe-area-inset-bottom, 0px);
++}
++.spreadContainer {
++  display: grid;
++  place-items: center;
++  height: 100%;
++  min-height: 0;
++  max-width: 100%;
++}
++.mangaPage {
++  max-width: 100%;
++  max-height: 100%;
++  display: block;
++  object-fit: contain;
++  box-shadow: 0 5px 20px #0007;
++}
++
++.bottomBar {
++  position: absolute;
++  inset: auto 0 0;
++  height: var(--reader-bottom);
++  box-sizing: border-box;
++  padding: 0 calc(12px + env(safe-area-inset-right, 0px))
++    env(safe-area-inset-bottom, 0px) calc(12px + env(safe-area-inset-left, 0px));
++  background: var(--paper);
++  border-top: 1px solid var(--line);
++  z-index: 35;
++}
++.bottomBarHidden { visibility: hidden; }
++
++.sliderRow {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  max-width: var(--shelf-width);
++  height: 100%;
++  margin: auto;
++}
++.readerOverlay input.pageSlider {
++  appearance: none;
++  -webkit-appearance: none;
++  flex: 1;
++  min-width: 0;
++  height: 44px;
++  margin: 0;
++  cursor: pointer;
++  padding: 0;
++  border: 0;
++  box-shadow: none;
++  background: transparent;
++
++  &::-webkit-slider-runnable-track {
++    height: 3px;
++    border-radius: 3px;
++    background: #ceb9b1;
++    box-shadow: none;
++  }
++
++  &::-webkit-slider-thumb {
++    appearance: none;
++    -webkit-appearance: none;
++    width: 16px;
++    height: 16px;
++    margin-top: -6.5px;
++    border: 0;
++    border-radius: 50%;
++    background: var(--accent);
++    box-shadow: none;
++  }
++
++  &::-moz-range-track { height: 3px; background: #ceb9b1; }
++  &::-moz-range-thumb { width: 16px; height: 16px; border: 0; background: var(--accent); }
++}
++.pageIndicator {
++  text-align: right;
++  min-width: 72px;
++  font-variant-numeric: tabular-nums;
++  white-space: nowrap;
++}
++
++.drawerOverlay { position: absolute; inset: 0; z-index: 39; background: #15101399; }
++.drawer {
++  position: absolute;
++  z-index: 42;
++  display: flex;
++  flex-direction: column;
++  overflow: hidden;
++  background: var(--paper);
++  border: 1px solid var(--line);
++  border-radius: 0 0 10px 10px;
++  box-shadow: 0 10px 30px #0005;
++
++  &[hidden] { display: none; }
++}
++
++.drawerTop {
++  top: var(--reader-top);
++  left: 50%;
++  transform: translateX(-50%);
++  width: min(var(--shelf-width), calc(100% - 16px));
++  max-height: calc(100% - var(--reader-top) - 18px - env(safe-area-inset-bottom, 0px));
++  box-sizing: border-box;
++}
++
++.drawerHeader {
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  flex: 0 0 auto;
++  padding: 4px 12px;
++  border-bottom: 1px solid var(--line);
++}
++.drawerHeaderTitle {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  font-weight: 700;
++}
++.headerIcon { width: 17px; height: 17px; fill: var(--accent); }
++
++.drawerBodyGrid, .drawerBodyBookmark {
++  overflow-y: auto;
++  min-height: 0;
++  padding: 8px 12px 12px;
++  overscroll-behavior: contain;
++  touch-action: pan-y;
++}
++.drawerBodyGrid {
++  display: grid;
++  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
++  column-gap: 14px;
++}
++
++.volCard, .bmCard, .track {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  min-height: 48px;
++  box-sizing: border-box;
++  padding: 6px 8px;
++  border-bottom: 1px solid var(--line);
++  cursor: pointer;
++}
++.volCard:hover, .bmCard:hover, .track:hover { background: #efe4da; }
++.volCardActive, .track[aria-pressed="true"] { background: #f4e3e4; color: var(--accent); }
++.volNum { min-width: 25px; color: var(--accent); font-variant-numeric: tabular-nums; }
++.volDetails { min-width: 0; }
++.bmCard { justify-content: space-between; }
++.bmTitle { font-weight: 700; }
++.bmDelBtn { min-height: 44px; display: grid; place-items: center; color: var(--accent); }
++.track {
++  appearance: none;
++  width: 100%;
++  border: 0;
++  border-bottom: 1px solid var(--line);
++  background: none;
++  color: inherit;
++  font: inherit;
++  text-align: left;
++}
++
++.emptyDrawerTip { margin: 0; padding: 16px; color: var(--muted); text-align: center; }
++.readerOverlay > .emptyDrawerTip { color: var(--paper); }
++
++.historyToast {
++  position: absolute;
++  top: calc(var(--reader-top) + 8px);
++  left: 50%;
++  transform: translateX(-50%);
++  z-index: 37;
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  width: max-content;
++  max-width: calc(100% - 16px);
++  box-sizing: border-box;
++  padding: 4px 10px;
++  border-radius: 5px;
++  background: var(--paper);
++  box-shadow: 0 3px 12px #0004;
++  font-size: 12px;
++}
++.historyBtn, .toastClose {
++  color: var(--accent);
++  font: inherit;
++  background: none;
++  border: 0;
++  min-height: 44px;
++  white-space: nowrap;
++  cursor: pointer;
++}
++.toastClose { display: grid; place-items: center; min-width: 32px; }
++
++.forcePortrait .readerApp {
++  --reader-top: calc(78px + env(safe-area-inset-top, 0px));
++}
++.forcePortrait .immersive {
++  --reader-top: env(safe-area-inset-top, 0px);
++}
++.forcePortrait {
++  .topBar {
++    grid-template-columns: repeat(5, minmax(0, 1fr));
++    grid-template-rows: 44px 24px;
++    gap: 0 2px;
++    padding-inline: calc(6px + env(safe-area-inset-left, 0px)) calc(6px + env(safe-area-inset-right, 0px));
++  }
++  .topLeft, .topRight { display: contents; }
++  .wgBtn { min-width: 0; padding: 0 2px; gap: 3px; font-size: 12px; }
++  .wgBtn svg { width: 14px; height: 14px; }
++  .titleBox {
++    grid-row: 2;
++    grid-column: 1 / -1;
++    display: flex;
++    justify-content: space-between;
++    align-items: center;
++    gap: 8px;
++    padding-inline: 7px;
++    text-align: left;
++  }
++  .mainTitle { font-size: 13px; }
++}
+diff --git a/packages/webgal/src/UI/Menu/DiscStatus/DiscStatus.tsx b/packages/webgal/src/UI/Menu/DiscStatus/DiscStatus.tsx
+new file mode 100644
+index 0000000..4eb7c30
+--- /dev/null
++++ b/packages/webgal/src/UI/Menu/DiscStatus/DiscStatus.tsx
+@@ -0,0 +1,68 @@
++import { useStageState } from '@/hooks/useStageState';
++import { useDispatch } from 'react-redux';
++import { setVisibility } from '@/store/GUIReducer';
++import useSoundEffect from '@/hooks/useSoundEffect';
++import styles from './discStatus.module.scss';
++
++const characters = [
++  ['mac_6026', '伊织', 'CHR_0416.png'],
++  ['mac_6027', '季子', 'CHR_1214.png'],
++  ['mac_6028', '泉', 'CHR_1718.png'],
++  ['mac_6029', '蓝子', 'CHR_0014.png'],
++] as const;
++
++const traits = [
++  ['mac_602a', '自信', '#deb47b'],
++  ['mac_602c', '别扭度', '#d99b9a'],
++  ['mac_602b', '自制心', '#9bb69a'],
++] as const;
++
++export function DiscStatus() {
++  const { GameVar, bgName } = useStageState();
++  const dispatch = useDispatch();
++  const { playSeClick } = useSoundEffect();
++  return (
++    <div className={styles.page}>
++      {bgName && <img className={styles.backdrop} src={bgName} alt="" />}
++      <section className={styles.sheet} aria-label="游戏状态">
++        <header className={styles.header}>
++          <h1>游戏状态</h1>
++          <button type="button" onClick={() => {
++            playSeClick();
++            dispatch(setVisibility({ component: 'showMenuPanel', visibility: false }));
++          }}>返回剧情</button>
++        </header>
++        <div className={styles.columns}>
++          <section aria-labelledby="disc-affection-heading">
++            <h2 id="disc-affection-heading">角色好感度</h2>
++            <dl className={styles.characters}>
++              {characters.map(([key, label, portrait]) => (
++                <div className={styles.character} key={key}>
++                  <dt><img src={`./game/figure/disc-hd/${portrait}`} alt="" /><span>{label}</span></dt>
++                  <dd data-stat={key}>{GameVar[key] ?? '—'}</dd>
++                </div>
++              ))}
++            </dl>
++          </section>
++          <section aria-labelledby="disc-traits-heading">
++            <h2 id="disc-traits-heading">性格数值</h2>
++            <div>
++              {traits.map(([key, label, color]) => {
++                const raw = GameVar[key];
++                const fill = typeof raw === 'number' ? Math.min(40, Math.max(0, raw)) : 0;
++                return (
++                  <div className={styles.trait} key={key}>
++                    <div className={styles.row}>
++                      <span>{label}</span><strong data-stat={key}>{raw ?? '—'}</strong>
++                    </div>
++                    <meter min={0} max={40} value={fill} aria-label={label} style={{ color }} />
++                  </div>
++                );
++              })}
++            </div>
++          </section>
++        </div>
++      </section>
++    </div>
++  );
++}
+diff --git a/packages/webgal/src/UI/Menu/DiscStatus/discStatus.module.scss b/packages/webgal/src/UI/Menu/DiscStatus/discStatus.module.scss
+new file mode 100644
+index 0000000..7781c6b
+--- /dev/null
++++ b/packages/webgal/src/UI/Menu/DiscStatus/discStatus.module.scss
+@@ -0,0 +1,159 @@
++.page {
++  position: relative;
++  height: 100%;
++  overflow: hidden;
++  display: grid;
++  place-items: center;
++  box-sizing: border-box;
++  padding: 100px 165px;
++  color: #f7ead9;
++  background: #21171d;
++  font-family: '资源圆体', serif;
++}
++
++.backdrop {
++  position: absolute;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++  object-fit: cover;
++  transform: scale(1.08);
++  filter: blur(32px) saturate(0.75);
++  opacity: 0.27;
++  pointer-events: none;
++}
++
++.sheet {
++  position: relative;
++  width: min(100%, 1940px);
++  padding: 72px 90px 92px;
++  box-sizing: border-box;
++  background: linear-gradient(135deg, #35272e 0%, #251c23 78%);
++  border: 2px solid #ab8355;
++  border-radius: 24px;
++  box-shadow: 0 44px 135px #140b16b3;
++}
++
++.header {
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  gap: 32px;
++  padding-bottom: 42px;
++  margin-bottom: 58px;
++  border-bottom: 1px solid #775a48;
++}
++
++.header h1 {
++  margin: 0;
++  color: #f8dbac;
++  font: 700 76px '思源宋体', serif;
++  letter-spacing: 0.08em;
++}
++
++.header button {
++  display: block;
++  flex-shrink: 0;
++  padding: 17px 29px;
++  border: 1px solid #b38e69;
++  border-radius: 10px;
++  background: #604535;
++  color: #fff0dc;
++  font: 35px '资源圆体', serif;
++  cursor: pointer;
++}
++
++.header button:hover,
++.header button:focus-visible {
++  background: #815d42;
++}
++
++.columns {
++  display: grid;
++  grid-template-columns: 1.55fr 1fr;
++  gap: 86px;
++}
++
++.columns h2 {
++  margin: 0 0 30px;
++  color: #d8b99a;
++  font-size: 42px;
++  letter-spacing: 0.06em;
++}
++
++.characters {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 24px;
++  margin: 0;
++}
++
++.character {
++  min-width: 0;
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 18px;
++  padding: 16px 23px 16px 16px;
++  border: 1px solid #74574c;
++  border-radius: 13px;
++  background: #493740;
++}
++
++.character dt {
++  display: flex;
++  align-items: center;
++  gap: 21px;
++  font-size: 40px;
++  white-space: nowrap;
++}
++
++.character img {
++  display: block;
++  width: 110px;
++  height: 102px;
++  object-fit: cover;
++  border-radius: 8px;
++}
++
++.character dd,
++.row strong {
++  margin: 0;
++  color: #ffe4b9;
++  font-size: 47px;
++  font-weight: normal;
++  font-variant-numeric: tabular-nums;
++}
++
++.trait + .trait {
++  margin-top: 28px;
++}
++
++.row {
++  min-height: 63px;
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  font-size: 38px;
++}
++
++.trait meter {
++  width: 100%;
++  height: 14px;
++  margin-top: 8px;
++  display: block;
++  accent-color: currentColor;
++}
++
++.trait meter::-webkit-meter-bar {
++  height: 14px;
++  box-sizing: border-box;
++  border: 0;
++  border-radius: 7px;
++  background: #4f3c45;
++}
++
++.trait meter::-webkit-meter-optimum-value {
++  border-radius: 7px;
++  background: currentColor;
++}
+diff --git a/packages/webgal/src/UI/Menu/Menu.tsx b/packages/webgal/src/UI/Menu/Menu.tsx
+index 29fe7ef..6768682 100644
+--- a/packages/webgal/src/UI/Menu/Menu.tsx
++++ b/packages/webgal/src/UI/Menu/Menu.tsx
+@@ -8,6 +8,7 @@ import { useSelector } from 'react-redux';
+ import { RootState } from '@/store/store';
+ import { MenuPanelTag } from '@/store/guiInterface';
+ import { Flowchart } from '@/UI/Flowchart/Flowchart';
++import { DiscStatus } from '@/UI/Menu/DiscStatus/DiscStatus';
+ 
+ /**
+  * Menu 页面，包括存读档、选项等
+@@ -15,6 +16,7 @@ import { Flowchart } from '@/UI/Flowchart/Flowchart';
+  */
+ const Menu: FC = () => {
+   const GUIState = useSelector((state: RootState) => state.GUI);
++  const statusOpen = GUIState.currentMenuTag === MenuPanelTag.DiscStatus;
+   let currentTag;
+   // let menuBgColor = 'linear-gradient(135deg, rgba(253,251,251,0.95) 0%, rgba(235,237,238,1) 100%)';
+   switch (GUIState.currentMenuTag) {
+@@ -33,13 +35,16 @@ const Menu: FC = () => {
+     case MenuPanelTag.Flowchart:
+       currentTag = <Flowchart />;
+       break;
++    case MenuPanelTag.DiscStatus:
++      currentTag = <DiscStatus />;
++      break;
+   }
+   return (
+     <>
+       {GUIState.showMenuPanel && (
+-        <div className={styles.Menu_main}>
++        <div className={`${styles.Menu_main}${statusOpen ? ` ${styles.Menu_status}` : ''}`}>
+           <div className={styles.Menu_TagContent}>{currentTag}</div>
+-          <MenuPanel />
++          {!statusOpen && <MenuPanel />}
+         </div>
+       )}
+     </>
+diff --git a/packages/webgal/src/UI/Menu/MenuPanel/menuPanel.module.scss b/packages/webgal/src/UI/Menu/MenuPanel/menuPanel.module.scss
+index fc879cb..6dcb941 100644
+--- a/packages/webgal/src/UI/Menu/MenuPanel/menuPanel.module.scss
++++ b/packages/webgal/src/UI/Menu/MenuPanel/menuPanel.module.scss
+@@ -49,3 +49,17 @@
+ .MenuPanel_button_hl{
+   background-color: rgba(245, 246, 247, 0.35) !important;
+ }
++
++:global(.is-mobile-device) {
++  .MenuPanel_main {
++    height: 13%;
++    padding: 0 calc(20px + env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) calc(20px + env(safe-area-inset-left, 0px));
++  }
++  .MenuPanel_button {
++    font-size: 245%;
++    padding: 0.35em 20px 0.15em 20px;
++    margin-right: 12px;
++    min-width: 13.5%;
++    -webkit-tap-highlight-color: transparent !important;
++  }
++}
+diff --git a/packages/webgal/src/UI/Menu/Options/TextPreview/TextPreview.tsx b/packages/webgal/src/UI/Menu/Options/TextPreview/TextPreview.tsx
+index 4ecc784..3dbfc0a 100644
+--- a/packages/webgal/src/UI/Menu/Options/TextPreview/TextPreview.tsx
++++ b/packages/webgal/src/UI/Menu/Options/TextPreview/TextPreview.tsx
+@@ -7,14 +7,27 @@ import useTrans from '@/hooks/useTrans';
+ import { getTextSize } from '@/UI/getTextSize';
+ import IMSSTextbox from '@/Stage/TextBox/IMSSTextbox';
+ import { compileSentence } from '@/Stage/TextBox/TextBox';
+-import { useState } from 'react';
++import { useEffect, useRef, useState } from 'react';
+ import { useStageState } from '@/hooks/useStageState';
++import { SCREEN_CONSTANTS } from '@/Core/util/constants';
+ 
+-export const TextPreview = (props: any) => {
++export const TextPreview = () => {
+   const t = useTrans('menu.options.pages.display.options.');
+   const userDataState = useSelector((state: RootState) => state.userData);
+   const stageState = useStageState();
+-  const previewBackground = stageState.bgName;
++  const discLayout = userDataState.globalGameVar.Enable_disc_status === true;
++  const previewBackground = stageState.bgName || (discLayout ? './game/background/disc-hd/EV_0000.png' : '');
++  const previewRef = useRef<HTMLDivElement>(null);
++  const [previewScale, setPreviewScale] = useState(1);
++  useEffect(() => {
++    if (!discLayout || !previewRef.current) return;
++    const element = previewRef.current;
++    const observer = new ResizeObserver(([bounds]) => {
++      setPreviewScale(bounds.contentRect.width / SCREEN_CONSTANTS.width);
++    });
++    observer.observe(element);
++    return () => observer.disconnect();
++  }, [discLayout]);
+   const textDelay = useTextDelay(userDataState.optionData.textSpeed);
+   const textDuration = useTextAnimationDuration(userDataState.optionData.textSpeed);
+   const textboxOpacity = userDataState.optionData.textboxOpacity;
+@@ -27,7 +40,7 @@ export const TextPreview = (props: any) => {
+   const previewTextArray = compileSentence(previewText, 3);
+   const showNameText = t('textPreview.title');
+   const showNameArray = compileSentence(showNameText, 3);
+-  const isHasName = showNameText !== '';
++  const isHasName = !discLayout && showNameText !== '';
+ 
+   const Textbox = IMSSTextbox;
+ 
+@@ -53,7 +66,7 @@ export const TextPreview = (props: any) => {
+     miniAvatar: '',
+     textDuration: textDuration,
+     font: font,
+-    textSizeState: size as unknown as number,
++    textSizeState: userDataState.optionData.textSize,
+     lineLimit: 3,
+     isUseStroke: true,
+     textboxOpacity: textboxOpacity,
+@@ -62,13 +75,17 @@ export const TextPreview = (props: any) => {
+ 
+   return (
+     <div
+-      className={styles.textPreviewMain}
++      ref={previewRef}
++      className={`${styles.textPreviewMain} ${discLayout ? styles.discPreview : ''}`}
+       style={{
+-        background: previewBackground ? `bottom / cover no-repeat url(${previewBackground})` : 'rgba(0, 0, 0, 0.1)',
++        background: previewBackground
++          ? `center / cover no-repeat url("${previewBackground}")`
++          : 'rgba(0, 0, 0, 0.1)',
+       }}
+       onClick={forcePreviewUpdate}
+     >
+-      <div className={styles.textbox}>
++      <div className={discLayout ? styles.discStage : styles.textbox}
++           style={discLayout ? {width: SCREEN_CONSTANTS.width, transform: `scale(${previewScale})`} : undefined}>
+         <Textbox {...textboxProps} />
+       </div>
+     </div>
+diff --git a/packages/webgal/src/UI/Menu/Options/TextPreview/textPreview.module.scss b/packages/webgal/src/UI/Menu/Options/TextPreview/textPreview.module.scss
+index 420b3bd..16319bf 100644
+--- a/packages/webgal/src/UI/Menu/Options/TextPreview/textPreview.module.scss
++++ b/packages/webgal/src/UI/Menu/Options/TextPreview/textPreview.module.scss
+@@ -9,4 +9,21 @@
+   width: 100%;
+   height: 100%;
+   position: relative;
+-}
+\ No newline at end of file
++}
++
++.textPreviewMain.discPreview {
++  position: relative;
++  aspect-ratio: 2560 / 700;
++  min-height: 0;
++  padding: 0;
++  box-sizing: border-box;
++  overflow: hidden;
++}
++
++.discStage {
++  position: absolute;
++  top: 0;
++  left: 0;
++  height: 700px;
++  transform-origin: top left;
++}
+diff --git a/packages/webgal/src/UI/Menu/Options/options.module.scss b/packages/webgal/src/UI/Menu/Options/options.module.scss
+index 81c0339..404fdba 100644
+--- a/packages/webgal/src/UI/Menu/Options/options.module.scss
++++ b/packages/webgal/src/UI/Menu/Options/options.module.scss
+@@ -197,3 +197,20 @@
+ .Options_page_button:hover {
+   opacity: 1;
+ }
++
++:global(.is-mobile-device) {
++  .Options_page_container {
++    padding: 0.5em 2em;
++    padding-left: calc(2em + env(safe-area-inset-left, 0px));
++    padding-right: calc(2em + env(safe-area-inset-right, 0px));
++  }
++  .Options_page_button {
++    font-size: 320%;
++    -webkit-tap-highlight-color: transparent !important;
++  }
++  .Option_select_button,
++  .Option_select_item {
++    padding: 0.35em 1em;
++    -webkit-tap-highlight-color: transparent !important;
++  }
++}
+diff --git a/packages/webgal/src/UI/Menu/menu.module.scss b/packages/webgal/src/UI/Menu/menu.module.scss
+index 143af6a..534150b 100644
+--- a/packages/webgal/src/UI/Menu/menu.module.scss
++++ b/packages/webgal/src/UI/Menu/menu.module.scss
+@@ -13,6 +13,14 @@
+   height: 90%;
+ }
+ 
++.Menu_status {
++  background: #1d1519;
++}
++
++.Menu_status .Menu_TagContent {
++  height: 100%;
++}
++
+ 
+ @keyframes Menu_ShowSoftly {
+   0% {
+diff --git a/packages/webgal/src/UI/Title/OpeningLoop.tsx b/packages/webgal/src/UI/Title/OpeningLoop.tsx
+new file mode 100644
+index 0000000..cbdc704
+--- /dev/null
++++ b/packages/webgal/src/UI/Title/OpeningLoop.tsx
+@@ -0,0 +1,385 @@
++import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
++import { createPortal } from 'react-dom';
++import { useDispatch, useSelector } from 'react-redux';
++import axios from 'axios';
++import { RootState } from '@/store/store';
++import { setOpeningVideo, setVisibility } from '@/store/GUIReducer';
++import { WebgalParser } from '@/Core/parser/sceneParser';
++import { assetSetter, fileType } from '@/Core/util/gameAssetsAccess/assetSetter';
++import { unlockCgFromAsset } from '@/Core/util/unlockCgFromAsset';
++import { logger } from '@/Core/util/logger';
++import styles from './openingLoop.module.scss';
++
++/** 标题页停留的默认时长（毫秒） */
++const DEFAULT_HOLD_TIME = 15000;
++
++type OpeningPhase = 'video' | 'hold';
++
++interface OpeningConfig {
++  video: string;
++  holdTime: number;
++}
++
++declare global {
++  interface Window {
++    /** index.html 在解析阶段读取 config.txt 后写入，用于首帧就盖住标题界面 */
++    __WEBGAL_OPENING_VIDEO__?: string;
++  }
++}
++
++/**
++ * 标题界面的片头循环（原版开屏行为）。
++ *
++ * 打开游戏直接播放片头 → 片头结束后停在标题界面（背景由 Title_img 指定）→
++ * 停留 Opening_hold_time 毫秒 → 再次播放片头，如此循环，直到玩家开始游戏。
++ *
++ * 由 game/config.txt 配置，未配置 Opening_video 时完全不渲染，不影响其他工程：
++ *   Opening_video:MV_OP01.mp4;       片头文件，放在 game/video/ 下
++ *   Opening_hold_time:15000;         标题界面停留时间（毫秒）
++ *
++ * 这里直接读取 config.txt，而不是取 userData.globalGameVar：引擎会把配置写进
++ * 本地存储并在后续 getStorage() 时整份恢复，改配置或改文件名后会读到旧值。
++ */
++export default function OpeningLoop() {
++  const dispatch = useDispatch();
++  const android = (window as Window & { AndroidBridge?: { getStartupOpeningResult?: () => string } }).AndroidBridge;
++  const startupOpening = android?.getStartupOpeningResult?.() ?? '';
++  const gameConfigReady = useSelector((state: RootState) => Boolean(state.userData.gameConfigInit.Game_key));
++  const showTitle = useSelector((state: RootState) => state.GUI.showTitle);
++  const panelOpen = useSelector(
++    (state: RootState) =>
++      state.GUI.showMenuPanel ||
++      state.GUI.showBacklog ||
++      state.GUI.showGlobalDialog ||
++      state.GUI.showExtra ||
++      state.GUI.showMangaReader ||
++      state.GUI.showPanicOverlay,
++  );
++  const volumeMain = useSelector((state: RootState) => state.userData.optionData?.volumeMain ?? 100);
++  const volumeBgm = useSelector((state: RootState) => state.userData.optionData?.bgmVolume ?? 100);
++
++  // index.html 里的内联脚本会在 React 挂载前读到片头配置，首帧就能直接起片头，
++  // 不必等这里的 axios；否则标题菜单会以默认样式先露出来半秒。
++  const earlyVideo = typeof window === 'undefined' ? undefined : window.__WEBGAL_OPENING_VIDEO__;
++  // 落地页在 index.html 里默认 display:none，读到片头配置后才决定是否显示；
++  // 这里用计算样式判断，避免“已隐藏但没拿到文件名”的空档露出默认样式标题。
++  const landingElement =
++    typeof document === 'undefined' ? null : (document.querySelector('.html-body__title-enter') as HTMLElement | null);
++  const landingHiddenEarly = !!landingElement && getComputedStyle(landingElement).display === 'none';
++
++  const [opening, setOpening] = useState<OpeningConfig | null>(
++    earlyVideo ? { video: earlyVideo, holdTime: DEFAULT_HOLD_TIME } : null,
++  );
++  const [pendingCover, setPendingCover] = useState(!startupOpening && !earlyVideo && landingHiddenEarly);
++  const videoRef = useRef<HTMLVideoElement | null>(null);
++  const openedCgUnlockedRef = useRef(false);
++  // 首次挂载就是开机：有片头时直接进入播放阶段，避免标题菜单多露一帧
++  const [phase, setPhase] = useState<OpeningPhase>(startupOpening ? 'hold' : 'video');
++  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
++  const [mutedByPolicy, setMutedByPolicy] = useState(false);
++  const [loaded, setLoaded] = useState(false);
++  const [failed, setFailed] = useState(false);
++  const [allowLoop, setAllowLoop] = useState(!startupOpening || startupOpening === 'played');
++
++  const enabled = opening !== null;
++  const holdTime = opening?.holdTime ?? DEFAULT_HOLD_TIME;
++  const videoUrl = opening ? assetSetter(opening.video, fileType.video) : '';
++  const showOpening = showTitle && !panelOpen && (pendingCover || (enabled && phase === 'video'));
++
++  useLayoutEffect(() => {
++    dispatch(setVisibility({ component: 'titleOpeningActive', visibility: showOpening }));
++  }, [dispatch, showOpening]);
++
++  /** 读取片头配置（停留时长等）；片头文件名已由 index.html 提前给出 */
++  useEffect(() => {
++    let cancelled = false;
++    axios
++      .get('./game/config.txt')
++      .then((response) => {
++        if (cancelled) return;
++        const config = WebgalParser.parseConfig(String(response.data));
++        const video = String(config.find((item) => item.command === 'Opening_video')?.args?.[0] ?? '').trim();
++        dispatch(setOpeningVideo(video));
++        if (!video) {
++          setOpening(null);
++          setPendingCover(false);
++          return;
++        }
++        const holdTimeValue = Number(config.find((item) => item.command === 'Opening_hold_time')?.args?.[0]);
++        setOpening({
++          video,
++          holdTime: Number.isFinite(holdTimeValue) && holdTimeValue > 0 ? holdTimeValue : DEFAULT_HOLD_TIME,
++        });
++        setPendingCover(false);
++      })
++      .catch(() => {
++        if (!cancelled) {
++          setOpening(null);
++          setPendingCover(false);
++        }
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, [dispatch]);
++
++  /**
++   * 跳过 WebGAL 自带的“PRESS THE SCREEN TO START”落地页与 Logo 过场：
++   * 片头循环开启时，打开页面就直接进入片头。
++   */
++  useEffect(() => {
++    if (!enabled) return;
++    const landing = document.querySelector('.html-body__title-enter') as HTMLElement | null;
++    if (landing) {
++      landing.style.pointerEvents = 'none';
++      landing.style.transition = 'none';
++      landing.style.opacity = '0';
++      landing.style.display = 'none';
++    }
++    dispatch(setVisibility({ component: 'isShowLogo', visibility: false }));
++  }, [enabled, dispatch]);
++
++  useEffect(() => {
++    if (!showTitle || panelOpen) setPhase('hold');
++  }, [showTitle, panelOpen]);
++
++  const handleMediaFailure = useCallback(() => {
++    if (!showOpening || failed) return;
++    logger.warn(`片头无法播放：${videoUrl}`);
++    setFailed(true);
++  }, [failed, showOpening, videoUrl]);
++
++  /** 播放片头：先尝试带声音播放，被策略拦截时静音起播，保证画面立刻在走 */
++  useLayoutEffect(() => {
++    if (!showOpening || !videoUrl || failed) return;
++    const video = videoRef.current;
++    if (!video) return;
++    let disposed = false;
++    setLoaded(false);
++    setAutoplayBlocked(false);
++    setMutedByPolicy(false);
++    video.volume = Math.min(1, Math.max(0, volumeMain / 100) * Math.max(0, volumeBgm / 100));
++    video.muted = false;
++    video
++      .play()
++      .then(() => {
++        if (!disposed) {
++          setMutedByPolicy(false);
++          setAutoplayBlocked(false);
++        }
++      })
++      .catch((error) => {
++        if (disposed) return;
++        if (error.name !== 'NotAllowedError') throw error;
++        // 浏览器在用户交互前通常不允许带声音自动播放：改为静音起播，画面不中断，
++        // 玩家任意一次点击/按键再恢复声音，且不会因此跳过片头。
++        video.muted = true;
++        return video.play().then(() => {
++          if (!disposed) {
++            setMutedByPolicy(true);
++            setAutoplayBlocked(false);
++          }
++        });
++      })
++      .catch((error) => {
++        if (!disposed) {
++          if (error.name === 'NotAllowedError') setAutoplayBlocked(true);
++          else handleMediaFailure();
++        }
++      });
++    return () => {
++      disposed = true;
++      video.pause();
++    };
++    // 音量单独同步，避免调节音量时重新开始片头
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [showOpening, videoUrl, failed, handleMediaFailure]);
++
++  useEffect(() => {
++    if (!showOpening || !videoUrl || loaded || failed || autoplayBlocked) return;
++    const timeout = window.setTimeout(handleMediaFailure, 15000);
++    return () => window.clearTimeout(timeout);
++  }, [showOpening, videoUrl, loaded, failed, autoplayBlocked, handleMediaFailure]);
++
++  /** 音量设置变化时同步到片头 */
++  useEffect(() => {
++    const video = videoRef.current;
++    if (!video) return;
++    video.volume = Math.min(1, Math.max(0, volumeMain / 100) * Math.max(0, volumeBgm / 100));
++  }, [volumeMain, volumeBgm, phase]);
++
++  /** 静音起播后，键盘操作也要能恢复声音 */
++  useEffect(() => {
++    if (!mutedByPolicy) return;
++    const unmute = () => {
++      const video = videoRef.current;
++      if (video && video.muted) {
++        video.muted = false;
++        setMutedByPolicy(false);
++      }
++    };
++    window.addEventListener('keydown', unmute);
++    return () => window.removeEventListener('keydown', unmute);
++  }, [mutedByPolicy]);
++
++  /** 标题界面停留计时，到时继续播放片头 */
++  useEffect(() => {
++    if (!allowLoop || !enabled || !showTitle || phase !== 'hold' || panelOpen || failed) return;
++    const timer = window.setTimeout(() => setPhase('video'), holdTime);
++    return () => window.clearTimeout(timer);
++  }, [allowLoop, enabled, showTitle, phase, panelOpen, holdTime, failed]);
++
++  /** 标题界面点“片头回放”：用同一条视频重放，不复制文件；重放结束后照常回到标题停留 */
++  useEffect(() => {
++    if (!enabled) return;
++    const replay = () => {
++      if (!showTitle || panelOpen) return;
++      setAllowLoop(true);
++      if (failed) {
++        setFailed(false);
++      }
++      const video = videoRef.current;
++      if (video && phase === 'video') {
++        video.currentTime = 0;
++        video.muted = false;
++        video.play().catch((error) => logger.warn('片头重放失败', error));
++        return;
++      }
++      setPhase('video');
++    };
++    window.addEventListener('webgal:replay-opening', replay);
++    return () => window.removeEventListener('webgal:replay-opening', replay);
++  }, [enabled, showTitle, panelOpen, phase, failed]);
++
++  const unlockOpeningCg = useCallback(() => {
++    if (openedCgUnlockedRef.current) return;
++    openedCgUnlockedRef.current = true;
++    unlockCgFromAsset('EV_0134.png', 'EV_OP01「オープニング」', 134, 'thumb/EV_0134.webp');
++  }, []);
++
++  useEffect(() => {
++    if (!startupOpening) return;
++    dispatch(setVisibility({ component: 'isEnterGame', visibility: true }));
++  }, [dispatch, startupOpening]);
++
++  useEffect(() => {
++    if ((startupOpening === 'played' || startupOpening === 'interrupted') && gameConfigReady) unlockOpeningCg();
++  }, [startupOpening, gameConfigReady, unlockOpeningCg]);
++
++  const endOpening = useCallback(() => {
++    setPhase('hold');
++    dispatch(setVisibility({ component: 'isEnterGame', visibility: true }));
++  }, [dispatch]);
++
++  const handlePlayByClick = useCallback(() => {
++    const video = videoRef.current;
++    if (!video) return;
++    video.muted = false;
++    video
++      .play()
++      .then(() => {
++        setAutoplayBlocked(false);
++        setMutedByPolicy(false);
++      })
++      .catch((error) => logger.warn('片头播放失败', error));
++  }, []);
++
++  /** 片头画面的点击：静音时只恢复声音，不跳过；有声时点击才跳过片头 */
++  const handleOpeningClick = useCallback(() => {
++    const video = videoRef.current;
++    if (!loaded) return;
++    if (video && video.muted) {
++      video.muted = false;
++      setMutedByPolicy(false);
++      return;
++    }
++    if (!android) endOpening();
++  }, [android, endOpening, loaded]);
++
++  if (!enabled) {
++    // 已知是片头工程、但配置还没读完：先盖一块黑场，避免标题以默认样式闪出来
++    if (showOpening) {
++      return <div className={styles.openingLoop_main} />;
++    }
++    return null;
++  }
++
++  if (!showOpening) {
++    return null;
++  }
++
++  const player = (
++    <div className={styles.openingLoop_main} onClick={autoplayBlocked || failed ? undefined : handleOpeningClick}>
++      {!failed && <video
++        key={videoUrl}
++        ref={videoRef}
++        className={styles.openingLoop_video}
++        src={videoUrl}
++        preload="auto"
++        playsInline={true}
++        onPlaying={() => {
++          setLoaded(true);
++          unlockOpeningCg();
++        }}
++        onEnded={({ currentTarget: video }) => {
++          if (android && opening.video === 'MV_OP01_phone60.mp4' &&
++            (!Number.isFinite(video.duration) || video.duration < 90 || video.currentTime < video.duration - 2)) {
++            handleMediaFailure();
++          } else {
++            endOpening();
++          }
++        }}
++        onError={handleMediaFailure}
++      />}
++      {(failed || (!loaded && !autoplayBlocked)) && (
++        <div className={styles.openingStatus} role="status">
++          <span>{failed ? '片头播放失败' : '正在载入片头…'}</span>
++          {failed && <button type="button" onClick={() => {
++            setFailed(false);
++          }}>重试</button>}
++          <button type="button" onClick={(event) => {
++            event.stopPropagation();
++            endOpening();
++          }}>{failed ? '返回标题' : '跳过片头'}</button>
++        </div>
++      )}
++      {autoplayBlocked && (
++        <div className={styles.openingLoop_blocked}>
++          <div className={styles.openingLoop_blockedTitle}>点击开始</div>
++          <div className={styles.openingLoop_blockedHint}>浏览器限制自动播放，点击一次即可播放片头</div>
++          <div
++            className={styles.openingLoop_button}
++            onClick={(event) => {
++              event.stopPropagation();
++              handlePlayByClick();
++            }}
++          >
++            播放片头
++          </div>
++        </div>
++      )}
++      {loaded && !autoplayBlocked && mutedByPolicy && (
++        <div className={styles.openingLoop_mutedHint}>浏览器限制自动播放：片头已静音播放，点击任意处开启声音</div>
++      )}
++      {loaded && !autoplayBlocked && !mutedByPolicy && (
++        android ? (
++          <button
++            type="button"
++            className={styles.androidSkip}
++            aria-label="返回标题"
++            onClick={(event) => {
++              event.stopPropagation();
++              if (window.confirm('结束片头并返回标题？')) endOpening();
++            }}
++          >
++            <span aria-hidden="true">跳过片头</span>
++          </button>
++        ) : <div className={styles.openingLoop_skipHint}>点击跳过片头</div>
++      )}
++    </div>
++  );
++  const viewportHost = opening.video === 'MV_OP01_phone60.mp4'
++    ? document.getElementById('html-body__viewport-video')
++    : null;
++  return viewportHost ? createPortal(player, viewportHost) : player;
++}
+diff --git a/packages/webgal/src/UI/Title/Title.tsx b/packages/webgal/src/UI/Title/Title.tsx
+index 2810941..69d471c 100644
+--- a/packages/webgal/src/UI/Title/Title.tsx
++++ b/packages/webgal/src/UI/Title/Title.tsx
+@@ -129,6 +129,31 @@ export default function Title() {
+                 {renderButtonText(t('extra.title'))}
+               </div>
+             )}
++            {userDataState.globalGameVar.Enable_Manga !== false && (
++              <div
++                className={applyStyle('Title_button', styles.Title_button)}
++                onClick={() => {
++                  playSeClick();
++                  dispatch(setVisibility({ component: 'showMangaReader', visibility: true }));
++                }}
++                onMouseEnter={playSeEnter}
++              >
++                {renderButtonText(t('manga.title'))}
++              </div>
++            )}
++            {GUIState.openingVideo !== '' && (
++              <div
++                className={applyStyle('Title_button', styles.Title_button)}
++                onClick={() => {
++                  playSeClick();
++                  // 交给 OpeningLoop 用同一条视频重放，不复制片头文件
++                  window.dispatchEvent(new CustomEvent('webgal:replay-opening'));
++                }}
++                onMouseEnter={playSeEnter}
++              >
++                {renderButtonText(t('replay.title'))}
++              </div>
++            )}
+             <div
+               className={applyStyle('Title_button', styles.Title_button)}
+               onClick={() => {
+diff --git a/packages/webgal/src/UI/Title/openingLoop.module.scss b/packages/webgal/src/UI/Title/openingLoop.module.scss
+new file mode 100644
+index 0000000..b7d77dc
+--- /dev/null
++++ b/packages/webgal/src/UI/Title/openingLoop.module.scss
+@@ -0,0 +1,139 @@
++.openingLoop_main {
++  position: absolute;
++  top: 0;
++  left: 0;
++  width: 100%;
++  height: 100%;
++  /* 压过标题(13)、鉴赏(14)、菜单(16)与语言选择(20)，但仍低于紧急回避页(256) */
++  z-index: 30;
++  pointer-events: auto;
++  background: #000;
++  overflow: hidden;
++}
++
++.openingLoop_video {
++  position: absolute;
++  top: 0;
++  left: 0;
++  width: 100%;
++  height: 100%;
++  object-fit: cover;
++  background: #000;
++}
++
++.openingLoop_mutedHint {
++  position: absolute;
++  left: 0;
++  right: 0;
++  bottom: 40px;
++  text-align: center;
++  color: rgba(255, 255, 255, 0.72);
++  font-size: 30px;
++  letter-spacing: 0.08em;
++  text-shadow: 0 0 12px rgba(0, 0, 0, 0.85);
++  pointer-events: none;
++}
++
++.openingLoop_skipHint {
++  position: absolute;
++  right: 48px;
++  bottom: 40px;
++  color: rgba(255, 255, 255, 0.5);
++  font-size: 30px;
++  letter-spacing: 0.12em;
++  text-shadow: 0 0 12px rgba(0, 0, 0, 0.8);
++  animation: openingLoopHintFade 6s ease-out forwards;
++  pointer-events: none;
++}
++
++@keyframes openingLoopHintFade {
++  0% {
++    opacity: 0;
++  }
++  10%,
++  55% {
++    opacity: 1;
++  }
++  100% {
++    opacity: 0;
++  }
++}
++
++.openingLoop_blocked {
++  position: absolute;
++  top: 0;
++  left: 0;
++  width: 100%;
++  height: 100%;
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  justify-content: center;
++  gap: 24px;
++  background: #000;
++  color: #f7f7f7;
++}
++
++.openingLoop_blockedTitle {
++  font-size: 72px;
++  letter-spacing: 0.3em;
++  text-indent: 0.3em;
++}
++
++.openingLoop_blockedHint {
++  font-size: 32px;
++  letter-spacing: 0.08em;
++  color: rgba(255, 255, 255, 0.55);
++}
++
++.openingLoop_button {
++  margin-top: 16px;
++  padding: 18px 56px;
++  font-size: 40px;
++  letter-spacing: 0.2em;
++  text-indent: 0.2em;
++  border: 2px solid rgba(255, 255, 255, 0.7);
++  border-radius: 4px;
++  cursor: pointer;
++  transition: all 0.25s ease;
++}
++
++.openingLoop_button:hover {
++  background: rgba(255, 255, 255, 0.12);
++  border-color: rgba(255, 255, 255, 1);
++}
++
++.openingStatus {
++  position: absolute;
++  inset: 0;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  gap: 16px;
++  color: #f7f7f7;
++  font-size: 16px;
++  background: #181516;
++}
++
++.openingStatus button {
++  min-height: 44px;
++  padding: 0 14px;
++  color: inherit;
++  font: inherit;
++  background: #2b2527;
++  border: 1px solid #655057;
++  border-radius: 6px;
++}
++
++.androidSkip {
++  position: absolute;
++  right: calc(12px + max(env(safe-area-inset-right, 0px), var(--android-toolbar-right, 0px)));
++  bottom: calc(12px + max(env(safe-area-inset-bottom, 0px), var(--android-toolbar-bottom, 0px)));
++  min-height: 44px;
++  padding: 0 14px;
++  color: rgba(255, 255, 255, 0.62);
++  font-size: 14px;
++  text-shadow: 0 1px 8px #000d;
++  background: transparent;
++  border: none;
++}
+diff --git a/packages/webgal/src/index.scss b/packages/webgal/src/index.scss
+index d24cafd..12408cd 100644
+--- a/packages/webgal/src/index.scss
++++ b/packages/webgal/src/index.scss
+@@ -2,6 +2,16 @@
+ 
+ @import 'Core/util/constants';
+ 
++* {
++  -webkit-tap-highlight-color: transparent !important;
++  outline: none;
++}
++
++:global(.is-mobile-device) * {
++  -webkit-tap-highlight-color: transparent !important;
++  -webkit-touch-callout: none !important;
++}
++
+ @font-face {
+   font-family: '资源圆体';
+   src: url('assets/fonts/ResourceHanRoundedCN-Regular.ttf') format('truetype');
+@@ -90,6 +100,10 @@ code {
+   -webkit-overflow-scrolling: auto;
+ }
+ 
++#ebg.html-body__effect-background--disc-cg ~ #root .App {
++  background-color: transparent;
++}
++
+ #pixiCanvas {
+   z-index: 5;
+ }
+diff --git a/packages/webgal/src/store/GUIReducer.ts b/packages/webgal/src/store/GUIReducer.ts
+index 8c1357f..1d93c29 100644
+--- a/packages/webgal/src/store/GUIReducer.ts
++++ b/packages/webgal/src/store/GUIReducer.ts
+@@ -34,6 +34,9 @@ const initState: IGuiState = {
+   isShowLogo: true,
+   enableAppreciationMode: false, // Paf87
+   fontOptimization: false,
++  openingVideo: '',
++  titleOpeningActive: false,
++  showMangaReader: false,
+ };
+ 
+ /**
+@@ -82,6 +85,14 @@ const GUISlice = createSlice({
+     setEnableAppreciationMode: (state, action: PayloadAction<boolean>) => {
+       state.enableAppreciationMode = action.payload;
+     },
++    /**
++     * 设置标题页可回放的片头文件（空字符串表示没有片头）
++     * @param state 当前GUI状态
++     * @param action 片头文件名
++     */
++    setOpeningVideo: (state, action: PayloadAction<string>) => {
++      state.openingVideo = action.payload;
++    },
+     setFontOptimization: (state, action: PayloadAction<boolean>) => {
+       state.fontOptimization = action.payload;
+     },
+@@ -97,6 +108,7 @@ export const {
+   setGuiAsset,
+   setLogoImage,
+   setEnableAppreciationMode,
++  setOpeningVideo,
+   setFontOptimization,
+   setFontOptions,
+ } = GUISlice.actions;
+diff --git a/packages/webgal/src/store/guiInterface.ts b/packages/webgal/src/store/guiInterface.ts
+index a26ad9d..b533875 100644
+--- a/packages/webgal/src/store/guiInterface.ts
++++ b/packages/webgal/src/store/guiInterface.ts
+@@ -6,6 +6,7 @@ export enum MenuPanelTag {
+   Load, // “读取”选项卡
+   Option, // “设置”选项卡
+   Flowchart, // “流程图”选项卡
++  DiscStatus,
+ }
+ 
+ /**
+@@ -32,11 +33,17 @@ export interface IGuiState {
+   isShowLogo: boolean;
+   enableAppreciationMode: boolean; // Pc102
+   fontOptimization: boolean; // 字体优化
++  openingVideo: string; // 标题页可回放的片头文件（由 OpeningLoop 从 config.txt 读出后写入）
++  titleOpeningActive: boolean;
++  showMangaReader: boolean; // 是否显示原著漫画阅读器
+ }
+ 
+ export type componentsVisibility = Pick<
+   IGuiState,
+-  Exclude<keyof IGuiState, 'currentMenuTag' | 'titleBg' | 'titleBgm' | 'logoImage' | 'theme' | 'fontOptions'>
++  Exclude<
++    keyof IGuiState,
++    'currentMenuTag' | 'titleBg' | 'titleBgm' | 'logoImage' | 'theme' | 'fontOptions' | 'openingVideo'
++  >
+ >;
+ // 标题资源
+ export type GuiAsset = Pick<IGuiState, 'titleBgm' | 'titleBg'>;
+diff --git a/packages/webgal/src/store/store.ts b/packages/webgal/src/store/store.ts
+index f2280af..c213e9c 100644
+--- a/packages/webgal/src/store/store.ts
++++ b/packages/webgal/src/store/store.ts
+@@ -1,8 +1,23 @@
+-import { configureStore, getDefaultMiddleware } from '@reduxjs/toolkit';
++import { configureStore, createListenerMiddleware, getDefaultMiddleware, isAnyOf } from '@reduxjs/toolkit';
+ import GUIReducer from '@/store/GUIReducer';
+-import userDataReducer from '@/store/userDataReducer';
++import userDataReducer, { unlockBgmInUserData, unlockCgInUserData } from '@/store/userDataReducer';
+ import savesReducer from '@/store/savesReducer';
+ 
++const collectionListener = createListenerMiddleware<{ userData: ReturnType<typeof userDataReducer> }>();
++collectionListener.startListening({
++  matcher: isAnyOf(unlockCgInUserData, unlockBgmInUserData),
++  effect: (action, api) => {
++    const kind = unlockCgInUserData.match(action) ? 'cg' : 'bgm';
++    const before = api.getOriginalState().userData.appreciationData[kind];
++    const after = api.getState().userData.appreciationData[kind];
++    if (after.length > before.length) {
++      window.dispatchEvent(new CustomEvent('webgal:collection-unlocked', {
++        detail: { kind, name: after[after.length - 1].name },
++      }));
++    }
++  },
++});
++
+ /**
+  * WebGAL 全局状态管理
+  */
+@@ -14,7 +29,7 @@ export const webgalStore = configureStore({
+   },
+   middleware: getDefaultMiddleware({
+     serializableCheck: false,
+-  }),
++  }).prepend(collectionListener.middleware),
+   devTools: process.env.NODE_ENV !== 'production',
+ });
+ 
+diff --git a/packages/webgal/src/store/userDataInterface.ts b/packages/webgal/src/store/userDataInterface.ts
+index f5d55bc..6ce5d19 100644
+--- a/packages/webgal/src/store/userDataInterface.ts
++++ b/packages/webgal/src/store/userDataInterface.ts
+@@ -78,6 +78,8 @@ export interface IAppreciationAsset {
+   url: string;
+   series: string;
+   order?: number;
++  /** 鉴赏列表用的缩略图，缺省时直接用 url（大图） */
++  thumb?: string;
+ }
+ 
+ export interface IAppreciation {
+diff --git a/packages/webgal/src/store/userDataReducer.ts b/packages/webgal/src/store/userDataReducer.ts
+index 5c211b4..e78e079 100644
+--- a/packages/webgal/src/store/userDataReducer.ts
++++ b/packages/webgal/src/store/userDataReducer.ts
+@@ -27,7 +27,7 @@ const initialOptionSet: IOptionData = {
+   autoSpeed: 50, // 自动播放速度
+   textSize: textSize.medium,
+   vocalVolume: 100, // 语音音量
+-  bgmVolume: 25, // 背景音乐音量
++  bgmVolume: 65, // 背景音乐音量
+   seVolume: 100, // 音效音量
+   uiSeVolume: 50, // UI音效音量
+   textboxFont: 0,
+@@ -65,7 +65,7 @@ const userDataSlice = createSlice({
+       state[key] = value;
+     },
+     unlockCgInUserData: (state, action: PayloadAction<IAppreciationAsset>) => {
+-      const { name, url, series, order } = action.payload;
++      const { name, url, series, order, thumb } = action.payload;
+       // 检查是否存在
+       let isExist = false;
+       state.appreciationData.cg.forEach((e) => {
+@@ -74,6 +74,9 @@ const userDataSlice = createSlice({
+           e.name = name;
+           e.series = series;
+           e.order = order;
++          // 旧存档是在缩略图之前生成的，预置重跑时补上；游戏内 unlockCg / changeBg
++          // 再解锁同一个 url 时不带 thumb，不能把已有的缩略图抹掉
++          if (thumb) e.thumb = thumb;
+         }
+       });
+       if (!isExist) {
+@@ -82,17 +85,18 @@ const userDataSlice = createSlice({
+     },
+     unlockBgmInUserData: (state, action: PayloadAction<IAppreciationAsset>) => {
+       const { name, url, series } = action.payload;
++      const displayName = appreciationMusicName(name);
+       // 检查是否存在
+       let isExist = false;
+       state.appreciationData.bgm.forEach((e) => {
+         if (url === e.url) {
+           isExist = true;
+-          e.name = name;
++          e.name = displayName;
+           e.series = series;
+         }
+       });
+       if (!isExist) {
+-        state.appreciationData.bgm.push(action.payload);
++        state.appreciationData.bgm.push({ ...action.payload, name: displayName });
+       }
+     },
+     /**
+@@ -101,7 +105,12 @@ const userDataSlice = createSlice({
+      * @param action
+      */
+     resetUserData: (state, action: PayloadAction<IUserData>) => {
+-      Object.assign(state, action.payload);
++      // An already-loaded config can be newer than the record being read from storage.
++      const config = Object.keys(state.gameConfigInit).length ? {...state.gameConfigInit} : action.payload.gameConfigInit;
++      Object.assign(state, action.payload, {
++        gameConfigInit: config,
++        globalGameVar: {...config, ...action.payload.globalGameVar},
++      });
+     },
+     /**
+      * 设置选项数据
+@@ -213,3 +222,4 @@ export default userDataSlice.reducer;
+ //         setSlPage,
+ //     };
+ // }
++import { appreciationMusicName } from '@/Core/util/appreciationMusicName';
+diff --git a/packages/webgal/src/translations/en.ts b/packages/webgal/src/translations/en.ts
+index c99ac61..c787df1 100644
+--- a/packages/webgal/src/translations/en.ts
++++ b/packages/webgal/src/translations/en.ts
+@@ -166,6 +166,14 @@ const en = {
+       title: 'EXTRA',
+       subtitle: '',
+     },
++    manga: {
++      title: 'MANGA',
++      subtitle: '',
++    },
++    replay: {
++      title: 'MOVIE',
++      subtitle: '',
++    },
+     exit: {
+       title: 'EXIT',
+       subtitle: '',
+diff --git a/packages/webgal/src/translations/jp.ts b/packages/webgal/src/translations/jp.ts
+index fb02281..93161f1 100644
+--- a/packages/webgal/src/translations/jp.ts
++++ b/packages/webgal/src/translations/jp.ts
+@@ -169,6 +169,10 @@ const jp = {
+       title: '鑑賞モード',
+       subtitle: 'EXTRA',
+     },
++    manga: {
++      title: '原作漫画',
++      subtitle: 'MANGA',
++    },
+     exit: {
+       title: 'ゲーム終了',
+       subtitle: 'EXIT',
+diff --git a/packages/webgal/src/translations/zh-cn.ts b/packages/webgal/src/translations/zh-cn.ts
+index 761a6ba..a92884f 100644
+--- a/packages/webgal/src/translations/zh-cn.ts
++++ b/packages/webgal/src/translations/zh-cn.ts
+@@ -173,6 +173,14 @@ const zhCn = {
+       title: '鉴赏模式',
+       subtitle: 'EXTRA',
+     },
++    manga: {
++      title: '原著漫画',
++      subtitle: 'MANGA',
++    },
++    replay: {
++      title: '片头回放',
++      subtitle: 'MOVIE',
++    },
+     exit: {
+       title: '退出游戏',
+       subtitle: 'EXIT',

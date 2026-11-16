@@ -9,7 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description="打包安卓的离线 game 资源目录")
     parser.add_argument('--source', type=Path,
                         default=project / '移植验证/WebGAL移植/新游戏打盘高清版/public/game')
-    parser.add_argument('--output', type=Path, default=project / '成品/安卓移植-v7/game.zip')
+    parser.add_argument('--output', type=Path, default=project / '成品/安卓移植/game.zip')
     args = parser.parse_args()
     source_dir = args.source.resolve()
     target_zip = args.output.resolve()

@@ -3595,7 +3595,7 @@ index 143af6a..534150b 100644
    0% {
 diff --git a/packages/webgal/src/UI/Title/OpeningLoop.tsx b/packages/webgal/src/UI/Title/OpeningLoop.tsx
 new file mode 100644
-index 0000000..cbdc704
+index 0000000..2d6e3bc
 --- /dev/null
 +++ b/packages/webgal/src/UI/Title/OpeningLoop.tsx
 @@ -0,0 +1,385 @@
@@ -3970,7 +3970,7 @@ index 0000000..cbdc704
 +            aria-label="返回标题"
 +            onClick={(event) => {
 +              event.stopPropagation();
-+              if (window.confirm('结束片头并返回标题？')) endOpening();
++              endOpening();
 +            }}
 +          >
 +            <span aria-hidden="true">跳过片头</span>

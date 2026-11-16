@@ -1,5 +1,5 @@
 diff --git a/app/build.gradle b/app/build.gradle
-index 6ad79ea..dc7c4fb 100644
+index 6ad79ea..f3490af 100644
 --- a/app/build.gradle
 +++ b/app/build.gradle
 @@ -8,11 +8,11 @@ android {
@@ -12,8 +12,8 @@ index 6ad79ea..dc7c4fb 100644
          targetSdk 34
 -        versionCode 1
 -        versionName "1.0"
-+        versionCode 7
-+        versionName "0.7"
++        versionCode 8
++        versionName "0.8"
  
          testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
      }
@@ -1267,13 +1267,12 @@ index 554b7c7..afe7c68 100644
 -
 diff --git a/app/src/main/java/com/openwebgal/demo/StartupOpening.kt b/app/src/main/java/com/openwebgal/demo/StartupOpening.kt
 new file mode 100644
-index 0000000..4daf81c
+index 0000000..9730d63
 --- /dev/null
 +++ b/app/src/main/java/com/openwebgal/demo/StartupOpening.kt
-@@ -0,0 +1,281 @@
+@@ -0,0 +1,271 @@
 +package com.openwebgal.demo
 +
-+import android.app.AlertDialog
 +import android.content.Context
 +import android.graphics.Color
 +import android.media.MediaPlayer
@@ -1299,7 +1298,6 @@ index 0000000..4daf81c
 +    private val retry = action(R.string.opening_retry)
 +    private var video: VideoView? = null
 +    private var source: File? = null
-+    private var confirmSkip: AlertDialog? = null
 +    private var frameRendered = false
 +    private var everRendered = false
 +    private var durationMs = 0
@@ -1353,16 +1351,9 @@ index 0000000..4daf81c
 +        }
 +        skip.setOnClickListener {
 +            if (failed) {
-+                complete("confirmed-error-exit")
-+            } else if (frameRendered && furthestMs >= MIN_SKIP_MS && confirmSkip == null) {
-+                confirmSkip = AlertDialog.Builder(context)
-+                    .setTitle(R.string.opening_skip_confirm)
-+                    .setNegativeButton(R.string.opening_keep_playing, null)
-+                    .setPositiveButton(R.string.opening_enter_title) { _, _ -> complete("confirmed-skip") }
-+                    .create().also { dialog ->
-+                        dialog.setOnDismissListener { confirmSkip = null }
-+                        dialog.show()
-+                    }
++                complete("error-exit")
++            } else if (frameRendered && furthestMs >= MIN_SKIP_MS) {
++                complete("manual-skip")
 +            }
 +        }
 +        retry.setOnClickListener { startAttempt() }
@@ -1539,7 +1530,6 @@ index 0000000..4daf81c
 +
 +    fun close() {
 +        closed = true
-+        confirmSkip?.dismiss()
 +        releaseVideo()
 +    }
 +
@@ -1602,10 +1592,10 @@ index 91cf48e..93e90ae 100644
 +    <string name="app_name">I\'s Pure</string>
 +</resources>
 diff --git a/app/src/main/res/values/values.xml b/app/src/main/res/values/values.xml
-index c0b499e..0e2aee1 100644
+index c0b499e..fc898b2 100644
 --- a/app/src/main/res/values/values.xml
 +++ b/app/src/main/res/values/values.xml
-@@ -2,4 +2,11 @@
+@@ -2,4 +2,9 @@
  <resources>
      <!--  游戏加载url  -->
      <string name="load_url">https://appassets.androidplatform.net/assets/webgal/index.html</string>
@@ -1613,8 +1603,6 @@ index c0b499e..0e2aee1 100644
 \ No newline at end of file
 +    <string name="opening_loading">正在载入片头…</string>
 +    <string name="opening_skip">跳过片头</string>
-+    <string name="opening_skip_confirm">跳过片头？</string>
-+    <string name="opening_keep_playing">继续播放</string>
 +    <string name="opening_unavailable">片头播放中断</string>
 +    <string name="opening_retry">重试</string>
 +    <string name="opening_enter_title">进入标题</string>

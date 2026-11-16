@@ -1140,6 +1140,69 @@ index cae9598..a765d5d 100644
    }
    previousImageUrl = url;
  }
+diff --git a/packages/webgal/src/Core/gameScripts/playEffect.ts b/packages/webgal/src/Core/gameScripts/playEffect.ts
+index c9c010a..666b98b 100644
+--- a/packages/webgal/src/Core/gameScripts/playEffect.ts
++++ b/packages/webgal/src/Core/gameScripts/playEffect.ts
+@@ -39,26 +39,27 @@ export const playEffect = (sentence: ISentence): IPerform => {
+     startFunction: () => {
+       let volume = getNumberArgByKey(sentence, 'volume') ?? 100; // 获取音量比
+       volume = Math.max(0, Math.min(volume, 100)); // 限制音量在 0-100 之间
+-      seElement = document.createElement('audio');
+-      seElement.src = url;
+-      if (isLoop) {
+-        seElement.loop = true;
+-      }
++      const audio = document.createElement('audio');
++      seElement = audio;
++      audio.src = url;
++      audio.loop = isLoop;
+       const userDataState = webgalStore.getState().userData;
+       const mainVol = userDataState.optionData.volumeMain;
+       const seVol = mainVol * 0.01 * (userDataState.optionData?.seVolume ?? 100) * 0.01 * volume * 0.01;
+-      seElement.volume = seVol;
+-      seElement.currentTime = 0;
++      audio.volume = seVol;
+       const endFunc = () => {
++        if (seElement !== audio) return;
+         isOver = true;
+         WebGAL.gameplay.performController.unmountPerform(performInitName);
+       };
+-      seElement.onended = endFunc;
+-      seElement.addEventListener('error', () => {
++      audio.onended = endFunc;
++      audio.onerror = () => {
+         logger.error(`播放效果音失败: ${url}`);
+         endFunc();
+-      });
+-      seElement.play().catch(() => {});
++      };
++      // 安卓的前后台处理会查找页面内的媒体，且只恢复仍挂载的音效。
++      document.body.append(audio);
++      void audio.play().catch(endFunc);
+     },
+     blockingAuto(): boolean {
+       if (isLoop) return false;
+@@ -68,11 +69,15 @@ export const playEffect = (sentence: ISentence): IPerform => {
+       return false;
+     },
+     stopFunction(): void {
+-      if (!seElement) return;
+-      seElement.onended = null;
+-      seElement.pause();
+-      seElement.remove();
++      const audio = seElement;
+       seElement = null;
++      if (!audio) return;
++      audio.onended = null;
++      audio.onerror = null;
++      audio.pause();
++      audio.removeAttribute('src');
++      audio.load();
++      audio.remove();
+     },
+   };
+ };
 diff --git a/packages/webgal/src/Core/gameScripts/playVideo.tsx b/packages/webgal/src/Core/gameScripts/playVideo.tsx
 index 083521c..8e5d445 100644
 --- a/packages/webgal/src/Core/gameScripts/playVideo.tsx
@@ -1416,7 +1479,7 @@ index 0000000..762cf81
 +  void setStorageAsync();
 +};
 diff --git a/packages/webgal/src/Stage/AudioContainer/AudioContainer.tsx b/packages/webgal/src/Stage/AudioContainer/AudioContainer.tsx
-index 764f828..2dc1a17 100644
+index 764f828..5a2eef5 100644
 --- a/packages/webgal/src/Stage/AudioContainer/AudioContainer.tsx
 +++ b/packages/webgal/src/Stage/AudioContainer/AudioContainer.tsx
 @@ -1,6 +1,6 @@
@@ -1447,9 +1510,7 @@ index 764f828..2dc1a17 100644
 +      GUI.showGlobalDialog || GUI.showBacklog || GUI.showPanicOverlay
 +    )),
 +  );
- 
--  // 淡入淡出定时器
--  const [fadeTimer, setFadeTimer] = useState(setTimeout(() => {}, 0));
++
 +  const bgmRef = useRef<HTMLAudioElement | null>(null);
 +  const attachBgm = useCallback((element: HTMLAudioElement | null) => {
 +    // 浏览器可能会继续播放已从页面移除的音频。
@@ -1461,6 +1522,16 @@ index 764f828..2dc1a17 100644
 +    }
 +    bgmRef.current = element;
 +  }, []);
+ 
+-  // 淡入淡出定时器
+-  const [fadeTimer, setFadeTimer] = useState(setTimeout(() => {}, 0));
++  useEffect(() => {
++    const bgmElement = bgmRef.current;
++    if (!bgmElement) return;
++    if (!bgmSrc || pauseBgm || (isShowTitle && !isEnterGame)) {
++      bgmElement.pause();
++      return;
++    }
  
 -  /**
 -   * 淡入BGM
@@ -1490,14 +1561,6 @@ index 764f828..2dc1a17 100644
 -          // 否则增加音量，并递归调用
 -          bgm.volume += volumeStep;
 -          fade();
-+  useEffect(() => {
-+    const bgmElement = bgmRef.current;
-+    if (!bgmElement) return;
-+    if (!bgmSrc || pauseBgm || (isShowTitle && !isEnterGame)) {
-+      bgmElement.pause();
-+      return;
-+    }
-+
 +    let fadeTimer: ReturnType<typeof setTimeout> | undefined;
 +    if (bgmEnter === 0) {
 +      bgmElement.volume = bgmVol;
@@ -1567,7 +1630,25 @@ index 764f828..2dc1a17 100644
  
    useEffect(() => {
      logger.debug(`设置背景音量：${bgmVol}`);
-@@ -123,11 +145,11 @@ export const AudioContainer = () => {
+@@ -103,12 +125,11 @@ export const AudioContainer = () => {
+       logger.error('UI SE Vol is NaN');
+       uiSeAudioElement.volume = isNaN(seVol) ? mainVol / 100 : seVol / 100;
+     }
+-    // 播放UI音效
+-    uiSeAudioElement.play();
+-    uiSeAudioElement.addEventListener('ended', () => {
+-      // Processing after sound effects are played
+-      uiSeAudioElement.remove();
+-    });
++    const remove = () => uiSeAudioElement.remove();
++    uiSeAudioElement.addEventListener('ended', remove, { once: true });
++    uiSeAudioElement.addEventListener('error', remove, { once: true });
++    document.body.append(uiSeAudioElement);
++    void uiSeAudioElement.play().catch(remove);
+     stageStateManager.setStageAndCommit('uiSe', '');
+   }, [uiSoundEffects]);
+ 
+@@ -123,11 +144,11 @@ export const AudioContainer = () => {
    return (
      <div>
        <audio
@@ -2033,6 +2114,176 @@ index 0000000..fc364c2
 +    document.body,
 +  );
 +}
+diff --git a/packages/webgal/src/UI/Extra/ExtraBgm.tsx b/packages/webgal/src/UI/Extra/ExtraBgm.tsx
+index 7115a18..42e9567 100644
+--- a/packages/webgal/src/UI/Extra/ExtraBgm.tsx
++++ b/packages/webgal/src/UI/Extra/ExtraBgm.tsx
+@@ -1,83 +1,82 @@
+-import { useDispatch, useSelector } from 'react-redux';
++import { useSelector } from 'react-redux';
+ import { RootState } from '@/store/store';
+-import React from 'react';
++import React, { useCallback, useEffect, useRef, useState } from 'react';
+ import styles from '@/UI/Extra/extra.module.scss';
+ import { useValue } from '@/hooks/useValue';
+ import { GoEnd, GoStart, MusicList, PlayOne, SquareSmall } from '@icon-park/react';
+ import useSoundEffect from '@/hooks/useSoundEffect';
+-import { setGuiAsset } from '@/store/GUIReducer';
++import { logger } from '@/Core/util/logger';
+ 
+ export function ExtraBgm() {
+   const { playSeClick, playSeEnter } = useSoundEffect();
+-  // 检查当前正在播放的bgm是否在bgm列表内
+-  const currentBgmSrc = useSelector((state: RootState) => state.GUI.titleBgm);
+-  const extraState = useSelector((state: RootState) => state.userData.appreciationData);
+-  const initName = 'Title_BGM';
+-  // 是否展示 bgm 列表
++  const tracks = useSelector((state: RootState) => state.userData.appreciationData.bgm);
++  const volume = useSelector(({ userData }: RootState) =>
++    (userData.optionData.volumeMain * userData.optionData.bgmVolume) / 10000,
++  );
++  const [selectedUrl, setSelectedUrl] = useState('');
++  const playerRef = useRef<HTMLAudioElement | null>(null);
++  const attachPlayer = useCallback((player: HTMLAudioElement | null) => {
++    if (!player) {
++      const previous = playerRef.current;
++      previous?.pause();
++      previous?.removeAttribute('src');
++      previous?.load();
++    }
++    playerRef.current = player;
++  }, []);
++  useEffect(() => {
++    if (playerRef.current) playerRef.current.volume = volume;
++  }, [tracks.length, volume]);
++
+   const isShowBgmList = useValue(false);
+-  let foundCurrentBgmName = initName;
+-  let foundCurrentBgmIndex = -1;
++  const selectedIndex = tracks.findIndex((track) => track.url === selectedUrl);
+   const iconSize = 39;
+   const bgmPlayerHeight = isShowBgmList.value ? '80%' : '10%';
+-  const bgmListLen = extraState.bgm.length;
+-  extraState.bgm.forEach((e, i) => {
+-    if (e.url === currentBgmSrc) {
+-      foundCurrentBgmName = e.name;
+-      foundCurrentBgmIndex = i;
+-    }
+-  });
+-  const currentPlayingBgmName = useValue('');
+-  if (foundCurrentBgmName !== initName && foundCurrentBgmName !== currentPlayingBgmName.value) {
+-    currentPlayingBgmName.set(foundCurrentBgmName);
+-  }
+-  const dispatch = useDispatch();
+ 
+-  function setBgmByIndex(index: number) {
+-    const e = extraState.bgm[index];
+-    currentPlayingBgmName.set(e.name);
+-    dispatch(setGuiAsset({ asset: 'titleBgm', value: e.url }));
++  function playTrack(index: number) {
++    const track = tracks[index];
++    const player = playerRef.current;
++    if (!track || !player) return;
++    if (player.getAttribute('src') !== track.url) player.src = track.url;
++    setSelectedUrl(track.url);
++    void player.play().catch((error) => {
++      if (error.name !== 'AbortError') logger.warn('鉴赏音乐播放失败', error);
++    });
+   }
+ 
+-  const showBgmList = extraState.bgm.map((e, i) => {
+-    let className = styles.bgmElement;
+-    if (e.name === currentPlayingBgmName.value) {
+-      className = className + ' ' + styles.bgmElement_active;
+-    }
++  const showBgmList = tracks.map((track, index) => {
++    const className = index === selectedIndex ? `${styles.bgmElement} ${styles.bgmElement_active}` : styles.bgmElement;
+     return (
+       <div
+         onClick={() => {
+           playSeClick();
+-          currentPlayingBgmName.set(e.name);
+-          dispatch(setGuiAsset({ asset: 'titleBgm', value: e.url }));
++          playTrack(index);
+         }}
+-        key={e.name}
++        key={track.url}
+         className={className}
+         style={{
+-          animationDelay: `${i * 150}ms`,
++          animationDelay: `${index * 150}ms`,
+         }}
+         onMouseEnter={playSeEnter}
+       >
+-        {e.name}
++        {track.name}
+       </div>
+     );
+   });
+ 
+   // If there are no BGM tracks available, don't render the player controls
+-  if (bgmListLen === 0) {
++  if (tracks.length === 0) {
+     return null;
+   }
+ 
+   return (
+     <div className={styles.bgmContainer} style={{ maxHeight: bgmPlayerHeight }}>
++      <audio ref={attachPlayer} loop preload="none" />
+       <div className={styles.bgmPlayerMain}>
+         <div
+           onClick={() => {
+             playSeClick();
+-            if (foundCurrentBgmIndex <= 0) {
+-              setBgmByIndex(bgmListLen - 1);
+-            } else {
+-              setBgmByIndex(foundCurrentBgmIndex - 1);
+-            }
++            playTrack(selectedIndex <= 0 ? tracks.length - 1 : selectedIndex - 1);
+           }}
+           onMouseEnter={playSeEnter}
+           className={styles.bgmControlButton}
+@@ -87,8 +86,7 @@ export function ExtraBgm() {
+         <div
+           onClick={() => {
+             playSeClick();
+-            const bgmControl: HTMLAudioElement = document.getElementById('currentBgm') as HTMLAudioElement;
+-            bgmControl?.play().then();
++            playTrack(Math.max(0, selectedIndex));
+           }}
+           onMouseEnter={playSeEnter}
+           className={styles.bgmControlButton}
+@@ -98,11 +96,7 @@ export function ExtraBgm() {
+         <div
+           onClick={() => {
+             playSeClick();
+-            if (foundCurrentBgmIndex >= bgmListLen - 1) {
+-              setBgmByIndex(0);
+-            } else {
+-              setBgmByIndex(foundCurrentBgmIndex + 1);
+-            }
++            playTrack((selectedIndex + 1) % tracks.length);
+           }}
+           onMouseEnter={playSeEnter}
+           className={styles.bgmControlButton}
+@@ -112,15 +106,14 @@ export function ExtraBgm() {
+         <div
+           onClick={() => {
+             playSeClick();
+-            const bgmControl: HTMLAudioElement = document.getElementById('currentBgm') as HTMLAudioElement;
+-            bgmControl.pause();
++            playerRef.current?.pause();
+           }}
+           onMouseEnter={playSeEnter}
+           className={styles.bgmControlButton}
+         >
+           <SquareSmall theme="filled" size={iconSize} fill="#fff" strokeWidth={3} strokeLinejoin="miter" />
+         </div>
+-        <div className={styles.bgmName}>{foundCurrentBgmName}</div>
++        <div className={styles.bgmName}>{tracks[selectedIndex]?.name}</div>
+         <div
+           onClick={() => {
+             playSeClick();
 diff --git a/packages/webgal/src/UI/Extra/ExtraCgElement.tsx b/packages/webgal/src/UI/Extra/ExtraCgElement.tsx
 index 7ad92eb..83d220e 100644
 --- a/packages/webgal/src/UI/Extra/ExtraCgElement.tsx

@@ -6,7 +6,7 @@ Write-Host "   《I's Pure》WebGAL 方案 B (高清原盘) 实体机部署" -Fo
 Write-Host "==================================================" -ForegroundColor Cyan
 
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../../../..')).Path
-$apkPath = Join-Path $projectRoot '成品/安卓移植/IS_Pure_Android_v8.apk'
+$apkPath = Join-Path $projectRoot '成品/安卓移植/IS_Pure_Android_v9.apk'
 $gameSourceDir = Join-Path $projectRoot '移植验证/WebGAL移植/新游戏打盘高清版/public/game'
 $packageName = "dev.ispure.webgal.prototype"
 $activityName = "com.openwebgal.demo.MainActivity"

@@ -55,3 +55,5 @@ __pycache__/
 *.keystore
 .env
 local.properties
+
+/移植验证/WebGAL移植/4204-开篇新档-*.json

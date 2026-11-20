@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>I's 完全版 - WebGAL 原著漫画阅读器</title>
+  <style>
+    /* =========================================================
+       WebGAL 4.6 原生设计规范与视觉语言体系
+       - 色系：深曜黑灰 (#0c1017) + 磨砂玻璃态 + WebGAL 标志性冰蓝 (#51A8DD)
+       - 字体阶梯：WebgalUI / 思源宋体 / 资源圆体 优雅字阶
+       - 交互动效：Cubic-bezier(0.16, 1, 0.3, 1) 柔化缓动
+       ========================================================= */
+    :root {
+      --wg-bg-dark: #0a0d14;
+      --wg-glass-bar: rgba(15, 20, 30, 0.82);
+      --wg-glass-panel: rgba(18, 24, 36, 0.92);
+      --wg-glass-border: rgba(255, 255, 255, 0.12);
+      --wg-cyan: #51A8DD;
+      --wg-cyan-glow: rgba(81, 168, 221, 0.45);
+      --wg-cyan-soft: rgba(81, 168, 221, 0.15);
+      --wg-text-main: #f5f6fa;
+      --wg-text-sub: #8c93a4;
+      --wg-danger: #ff6b6b;
+      --wg-ease: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      outline: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      background-color: var(--wg-bg-dark);
+      color: var(--wg-text-main);
+      font-family: "WebgalUI", "思源宋体", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    #reader-app {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: radial-gradient(circle at 50% 50%, #111723 0%, #080a0f 100%);
+      animation: wgFadeIn 0.35s var(--wg-ease);
+    }
+
+    @keyframes wgFadeIn {
+      from { opacity: 0; transform: scale(0.99); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    /* =========================================================
+       Top Header Bar (WebGAL 悬浮磨砂顶栏)
+       ========================================================= */
+    .top-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      background: var(--wg-glass-bar);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--wg-glass-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 50;
+      transition: transform 0.3s var(--wg-ease);
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    }
+    .top-bar.hidden {
+      transform: translateY(-100%);
+    }
+
+    .top-left, .top-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* WebGAL 风格艺术字标题 */
+    .title-box {
+      display: flex;
+      flex-direction: column;
+      margin-left: 6px;
+    }
+    .main-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      background: linear-gradient(150deg, #FFFFFF 0%, #E2EDF8 60%, var(--wg-cyan) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 16px var(--wg-cyan-glow);
+    }
+    .sub-title {
+      font-size: 11px;
+      color: var(--wg-text-sub);
+      font-weight: 400;
+      margin-top: 1px;
+    }
+
+    /* WebGAL 标准微透质感胶囊按钮 */
+    .wg-btn {
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid var(--wg-glass-border);
+      color: var(--wg-text-main);
+      height: 34px;
+      padding: 0 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      transition: all 0.22s var(--wg-ease);
+      backdrop-filter: blur(8px);
+    }
+    .wg-btn svg {
+      width: 15px;
+      height: 15px;
+      fill: currentColor;
+    }
+    .wg-btn:hover {
+      background: var(--wg-cyan-soft);
+      border-color: var(--wg-cyan);
+      color: #fff;
+      box-shadow: 0 0 12px var(--wg-cyan-glow);
+      transform: translateY(-1px);
+    }
+    .wg-btn:active {
+      transform: translateY(1px);
+    }
+    .wg-btn.active {
+      background: linear-gradient(135deg, rgba(81, 168, 221, 0.4) 0%, rgba(81, 168, 221, 0.15) 100%);
+      border-color: var(--wg-cyan);
+      color: #fff;
+      box-shadow: 0 0 14px var(--wg-cyan-glow);
+    }
+    .wg-btn.close {
+      background: rgba(235, 77, 75, 0.12);
+      border-color: rgba(235, 77, 75, 0.3);
+      color: #ff8b8b;
+    }
+    .wg-btn.close:hover {
+      background: rgba(235, 77, 75, 0.28);
+      border-color: #ff6b6b;
+      color: #fff;
+      box-shadow: 0 0 14px rgba(235, 77, 75, 0.5);
+    }
+
+    /* =========================================================
+       History Resume Floating Toast (继续阅读气泡)
+       ========================================================= */
+    .history-toast {
+      position: absolute;
+      top: 68px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 27, 40, 0.94);
+      border: 1px solid var(--wg-cyan);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 16px var(--wg-cyan-glow);
+      backdrop-filter: blur(16px);
+      padding: 8px 18px;
+      border-radius: 24px;
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 13px;
+      animation: wgSlideDown 0.35s var(--wg-ease);
+    }
+    @keyframes wgSlideDown {
+      from { opacity: 0; transform: translate(-50%, -10px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+    .history-toast.hidden { display: none; }
+    .history-btn {
+      background: linear-gradient(135deg, var(--wg-cyan) 0%, #3a8ebd 100%);
+      color: #fff;
+      border: none;
+      padding: 4px 14px;
+      border-radius: 14px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.2s;
+      box-shadow: 0 2px 8px var(--wg-cyan-glow);
+    }
+    .history-btn:hover {
+      filter: brightness(1.15);
+      transform: scale(1.04);
+    }
+    .toast-close {
+      cursor: pointer;
+      color: var(--wg-text-sub);
+      font-size: 14px;
+      line-height: 1;
+      transition: color 0.2s;
+    }
+    .toast-close:hover { color: #fff; }
+
+    /* =========================================================
+       Main Viewport (日漫拟真双页与平滑画卷)
+       ========================================================= */
+    .viewport {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .spread-container {
+      display: flex;
+      flex-direction: row-reverse; /* 日漫右翻 RTL：右侧为先行页，左侧为后行页 */
+      align-items: center;
+      justify-content: center;
+      max-width: 100%;
+      max-height: 100%;
+      height: 100%;
+      position: relative;
+      perspective: 1200px;
+    }
+
+    /* 漫画书脊中缝立体阴影效果 */
+    .spread-container.dual-mode::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 28px;
+      transform: translateX(-50%);
+      background: linear-gradient(to right, 
+        rgba(0,0,0,0) 0%, 
+        rgba(0,0,0,0.4) 40%, 
+        rgba(0,0,0,0.65) 50%, 
+        rgba(0,0,0,0.4) 60%, 
+        rgba(0,0,0,0) 100%);
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .manga-page {
+      max-height: 100%;
+      max-width: 50vw;
+      object-fit: contain;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+      background-color: #121620;
+      pointer-events: none;
+      transition: opacity 0.2s var(--wg-ease);
+    }
+
+    @media (max-width: 768px) {
+      .spread-container {
+        flex-direction: row;
+      }
+      .spread-container.dual-mode::after {
+        display: none;
+      }
+      .manga-page {
+        max-width: 100vw;
+      }
+      .manga-page.secondary {
+        display: none !important;
+      }
+    }
+
+    /* 点击与手势导航热区 */
+    .zone-left, .zone-right, .zone-mid {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      z-index: 20;
+    }
+    .zone-left { left: 0; width: 32%; cursor: pointer; }
+    .zone-right { right: 0; width: 32%; cursor: pointer; }
+    .zone-mid { left: 32%; right: 32%; width: 36%; cursor: default; }
+
+    /* 悬浮边缘翻页箭头提示 */
+    .edge-hint {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 44px;
+      height: 80px;
+      background: rgba(15, 20, 30, 0.55);
+      border: 1px solid var(--wg-glass-border);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--wg-text-sub);
+      opacity: 0;
+      transition: all 0.25s var(--wg-ease);
+      pointer-events: none;
+      z-index: 25;
+      backdrop-filter: blur(8px);
+    }
+    .edge-hint.left { left: 16px; }
+    .edge-hint.right { right: 16px; }
+    .zone-left:hover ~ .edge-hint.left { opacity: 0.85; transform: translateY(-50%) translateX(4px); color: var(--wg-cyan); }
+    .zone-right:hover ~ .edge-hint.right { opacity: 0.85; transform: translateY(-50%) translateX(-4px); color: var(--wg-cyan); }
+
+    /* =========================================================
+       Bottom Control Floating Bar (WebGAL 经典底部控制胶囊)
+       ========================================================= */
+    .bottom-bar {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(720px, 92%);
+      background: var(--wg-glass-bar);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--wg-glass-border);
+      border-radius: 36px;
+      padding: 10px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 50;
+      transition: all 0.3s var(--wg-ease);
+      box-shadow: 0 10px 36px rgba(0, 0, 0, 0.55);
+    }
+    .bottom-bar.hidden {
+      transform: translate(-50%, 130%);
+      opacity: 0;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    /* WebGAL 专属拟物滑块 */
+    .page-slider {
+      flex: 1;
+      height: 6px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 3px;
+      direction: rtl; /* 日漫右翻向左滑动 */
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .page-slider:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+    .page-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--wg-cyan);
+      box-shadow: 0 0 10px var(--wg-cyan-glow);
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .page-slider::-webkit-slider-thumb:hover {
+      transform: scale(1.25);
+      box-shadow: 0 0 14px var(--wg-cyan);
+    }
+
+    .page-indicator {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--wg-cyan);
+      min-width: 85px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.5px;
+    }
+
+    .control-hints {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10.5px;
+      color: var(--wg-text-sub);
+      padding: 0 4px;
+    }
+
+    /* =========================================================
+       Side Drawers (分卷与书签 WebGAL 玻璃质感侧边抽屉)
+       ========================================================= */
+    .drawer-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(5, 7, 12, 0.65);
+      backdrop-filter: blur(6px);
+      z-index: 80;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s var(--wg-ease);
+    }
+    .drawer-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .drawer {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 340px;
+      max-width: 86%;
+      background: var(--wg-glass-panel);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      z-index: 90;
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.85);
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.35s var(--wg-ease);
+    }
+    .drawer.left {
+      left: 0;
+      transform: translateX(-100%);
+      border-right: 1px solid var(--wg-glass-border);
+    }
+    .drawer.right {
+      right: 0;
+      transform: translateX(100%);
+      border-left: 1px solid var(--wg-glass-border);
+    }
+    .drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      padding: 18px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--wg-glass-border);
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .drawer-header h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .drawer-close-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--wg-text-sub);
+      transition: all 0.2s;
+    }
+    .drawer-close-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    .drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* 分卷卡片 (带迷你进度指示条) */
+    .vol-card {
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid var(--wg-glass-border);
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: all 0.2s var(--wg-ease);
+      position: relative;
+      overflow: hidden;
+    }
+    .vol-card:hover {
+      background: var(--wg-cyan-soft);
+      border-color: var(--wg-cyan);
+      transform: translateX(3px);
+    }
+    .vol-card.active {
+      background: linear-gradient(90deg, rgba(81, 168, 221, 0.2) 0%, rgba(81, 168, 221, 0.05) 100%);
+      border-color: var(--wg-cyan);
+      box-shadow: inset 3px 0 0 var(--wg-cyan);
+    }
+    .vol-num {
+      width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--wg-cyan);
+      border: 1px solid rgba(81, 168, 221, 0.3);
+    }
+    .vol-card.active .vol-num {
+      background: var(--wg-cyan);
+      color: #fff;
+      box-shadow: 0 0 10px var(--wg-cyan-glow);
+    }
+    .vol-details {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .vol-name {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .vol-progress-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--wg-text-sub);
+    }
+    .vol-mini-bar {
+      height: 3px;
+      width: 100%;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 2px;
+      margin-top: 4px;
+      overflow: hidden;
+    }
+    .vol-mini-fill {
+      height: 100%;
+      background: var(--wg-cyan);
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+
+    /* 书签卡片 */
+    .bm-card {
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid var(--wg-glass-border);
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.2s var(--wg-ease);
+    }
+    .bm-card:hover {
+      background: var(--wg-cyan-soft);
+      border-color: var(--wg-cyan);
+      transform: translateX(-3px);
+    }
+    .bm-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .bm-time {
+      font-size: 11px;
+      color: var(--wg-text-sub);
+      margin-top: 3px;
+    }
+    .bm-del-btn {
+      color: var(--wg-text-sub);
+      padding: 6px;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+    .bm-del-btn:hover {
+      color: var(--wg-danger);
+      background: rgba(255, 107, 107, 0.15);
+    }
+    .empty-drawer-tip {
+      font-size: 12.5px;
+      color: var(--wg-text-sub);
+      text-align: center;
+      padding: 40px 0;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+<div id="reader-app">
+  <!-- Top Bar -->
+  <div class="top-bar" id="topBar">
+    <div class="top-left">
+      <button class="wg-btn" onclick="openDrawer('volume')">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+        <span>卷目目录</span>
+      </button>
+      <div class="title-box">
+        <div class="main-title" id="mangaTitle">I''s 完全版 第01卷</div>
+        <div class="sub-title" id="mangaSubTitle">第 1 / 255 页 (封面)</div>
+      </div>
+    </div>
+    <div class="top-right">
+      <button class="wg-btn" id="btnBookmark" onclick="toggleBookmark()">
+        <svg viewBox="0 0 24 24"><path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2Z"/></svg>
+        <span id="bmText">存书签</span>
+      </button>
+      <button class="wg-btn" onclick="openDrawer('bookmark')">
+        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+        <span>书签夹</span>
+      </button>
+      <button class="wg-btn" id="btnMode" onclick="toggleLayout()">
+        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2Zm-7 16H5V5h7v14Zm7 0h-5V5h5v14Z"/></svg>
+        <span id="modeText">双页(RTL)</span>
+      </button>
+      <button class="wg-btn close" onclick="closeReader()">
+        <svg viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        <span>返回游戏</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- History Prompt Toast -->
+  <div class="history-toast hidden" id="historyToast">
+    <span id="historyText">上次阅读到：第 1 卷 第 1 页</span>
+    <button class="history-btn" onclick="resumeHistory()">继续阅读</button>
+    <span class="toast-close" onclick="closeHistoryToast()">✕</span>
+  </div>
+
+  <!-- Click zones for navigation -->
+  <div class="zone-left" onclick="navigate('next')"></div>
+  <div class="zone-mid" onclick="toggleBars()"></div>
+  <div class="zone-right" onclick="navigate('prev')"></div>
+
+  <!-- Hover navigation cues -->
+  <div class="edge-hint left">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+  </div>
+  <div class="edge-hint right">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+  </div>
+
+  <!-- Viewport -->
+  <div class="viewport" id="viewport">
+    <div class="spread-container dual-mode" id="spreadContainer">
+      <img id="pageRight" class="manga-page" src="" alt="Right Page">
+      <img id="pageLeft" class="manga-page secondary" src="" alt="Left Page">
+    </div>
+  </div>
+
+  <!-- Bottom Floating Pill Bar -->
+  <div class="bottom-bar" id="bottomBar">
+    <div class="slider-row">
+      <input type="range" class="page-slider" id="pageSlider" min="1" max="15" value="1" oninput="onSliderChange(this.value)">
+      <div class="page-indicator" id="pageIndicator">1 / 15</div>
+    </div>
+    <div class="control-hints">
+      <span>← 点击左侧 下一页 (日漫流向)</span>
+      <span>中央轻触 开关控制栏</span>
+      <span>点击右侧 上一页 →</span>
+    </div>
+  </div>
+
+  <!-- Overlay for Drawers -->
+  <div class="drawer-overlay" id="drawerOverlay" onclick="closeAllDrawers()"></div>
+
+  <!-- Volume Drawer (Left) -->
+  <div class="drawer left" id="volumeDrawer">
+    <div class="drawer-header">
+      <h3>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="var(--wg-cyan)"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+        全 12 卷完全版目录
+      </h3>
+      <div class="drawer-close-btn" onclick="closeAllDrawers()">✕</div>
+    </div>
+    <div class="drawer-body" id="volumeList"></div>
+  </div>
+
+  <!-- Bookmark Drawer (Right) -->
+  <div class="drawer right" id="bookmarkDrawer">
+    <div class="drawer-header">
+      <h3>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="var(--wg-cyan)"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+        我的书签
+      </h3>
+      <div class="drawer-close-btn" onclick="closeAllDrawers()">✕</div>
+    </div>
+    <div class="drawer-body" id="bookmarkList"></div>
+  </div>
+</div>
+
+<script>
+  // 12 Volumes Metadata Specification
+  const volumes = [
+    { id: 1, title: "I''s 完全版 第01卷", pages: 255, sampleAvailable: 15 },
+    { id: 2, title: "I''s 完全版 第02卷", pages: 264, sampleAvailable: 0 },
+    { id: 3, title: "I''s 完全版 第03卷", pages: 253, sampleAvailable: 0 },
+    { id: 4, title: "I''s 完全版 第04卷", pages: 246, sampleAvailable: 0 },
+    { id: 5, title: "I''s 完全版 第05卷", pages: 229, sampleAvailable: 0 },
+    { id: 6, title: "I''s 完全版 第06卷", pages: 235, sampleAvailable: 0 },
+    { id: 7, title: "I''s 完全版 第07卷", pages: 254, sampleAvailable: 0 },
+    { id: 8, title: "I''s 完全版 第08卷", pages: 258, sampleAvailable: 0 },
+    { id: 9, title: "I''s 完全版 第09卷", pages: 259, sampleAvailable: 0 },
+    { id: 10, title: "I''s 完全版 第10卷", pages: 239, sampleAvailable: 0 },
+    { id: 11, title: "I''s 完全版 第11卷", pages: 250, sampleAvailable: 0 },
+    { id: 12, title: "I''s 完全版 第12卷", pages: 240, sampleAvailable: 0 },
+  ];
+
+  let currentVol = 1;
+  let currentPage = 1;
+  let isDualPage = window.innerWidth > 768;
+  let barsVisible = true;
+
+  // WebGAL LocalStorage Keys
+  const STORAGE_KEY_HISTORY = "webgal_manga_history";
+  const STORAGE_KEY_BOOKMARKS = "webgal_manga_bookmarks";
+  const STORAGE_KEY_PROGRESS = "webgal_manga_vol_progress";
+
+  const topBar = document.getElementById('topBar');
+  const bottomBar = document.getElementById('bottomBar');
+  const pageRight = document.getElementById('pageRight');
+  const pageLeft = document.getElementById('pageLeft');
+  const pageSlider = document.getElementById('pageSlider');
+  const pageIndicator = document.getElementById('pageIndicator');
+  const mangaTitle = document.getElementById('mangaTitle');
+  const mangaSubTitle = document.getElementById('mangaSubTitle');
+  const btnBookmark = document.getElementById('btnBookmark');
+  const bmText = document.getElementById('bmText');
+  const historyToast = document.getElementById('historyToast');
+  const historyText = document.getElementById('historyText');
+  const spreadContainer = document.getElementById('spreadContainer');
+  const modeText = document.getElementById('modeText');
+
+  // Web Audio 极简音效发生器 (模拟 WebGAL 的原生点击/翻页音效 playSeClick)
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function playSeClick() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.05);
+    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.05);
+  }
+
+  // --- 1. History Persistence ---
+  function saveHistory() {
+    const history = {
+      volume: currentVol,
+      page: currentPage,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(history));
+
+    let prog = JSON.parse(localStorage.getItem(STORAGE_KEY_PROGRESS) || "{}");
+    prog[currentVol] = currentPage;
+    localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(prog));
+    updateBookmarkState();
+  }
+
+  function checkHistoryOnStartup() {
+    const saved = localStorage.getItem(STORAGE_KEY_HISTORY);
+    if (saved) {
+      const h = JSON.parse(saved);
+      if (h && (h.volume !== currentVol || h.page !== currentPage)) {
+        historyText.textContent = `上次读到：第 ${h.volume} 卷 第 ${h.page} 页`;
+        historyToast.classList.remove('hidden');
+      }
+    }
+  }
+
+  function resumeHistory() {
+    playSeClick();
+    const saved = localStorage.getItem(STORAGE_KEY_HISTORY);
+    if (saved) {
+      const h = JSON.parse(saved);
+      switchVolume(h.volume, h.page);
+    }
+    closeHistoryToast();
+  }
+
+  function closeHistoryToast() {
+    historyToast.classList.add('hidden');
+  }
+
+  // --- 2. Bookmarks Persistence ---
+  function getBookmarks() {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY_BOOKMARKS) || "[]");
+  }
+
+  function isCurrentPageBookmarked() {
+    const list = getBookmarks();
+    return list.some(b => b.vol === currentVol && b.page === currentPage);
+  }
+
+  function updateBookmarkState() {
+    if (isCurrentPageBookmarked()) {
+      btnBookmark.classList.add('active');
+      bmText.textContent = "已书签";
+    } else {
+      btnBookmark.classList.remove('active');
+      bmText.textContent = "存书签";
+    }
+  }
+
+  function toggleBookmark() {
+    playSeClick();
+    let list = getBookmarks();
+    const idx = list.findIndex(b => b.vol === currentVol && b.page === currentPage);
+    if (idx >= 0) {
+      list.splice(idx, 1);
+    } else {
+      list.unshift({
+        id: Date.now(),
+        vol: currentVol,
+        page: currentPage,
+        title: `第 ${currentVol} 卷 第 ${currentPage} 页`,
+        time: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString().slice(0, 5)
+      });
+    }
+    localStorage.setItem(STORAGE_KEY_BOOKMARKS, JSON.stringify(list));
+    updateBookmarkState();
+    renderBookmarkList();
+  }
+
+  function removeBookmark(id, event) {
+    event.stopPropagation();
+    playSeClick();
+    let list = getBookmarks().filter(b => b.id !== id);
+    localStorage.setItem(STORAGE_KEY_BOOKMARKS, JSON.stringify(list));
+    updateBookmarkState();
+    renderBookmarkList();
+  }
+
+  function renderBookmarkList() {
+    const list = getBookmarks();
+    const container = document.getElementById('bookmarkList');
+    if (list.length === 0) {
+      container.innerHTML = '<div class="empty-drawer-tip">暂无书签记录<br>阅读时轻触顶部“存书签”即可添加标记</div>';
+      return;
+    }
+    container.innerHTML = list.map(b => `
+      <div class="bm-card" onclick="jumpToBookmark(${b.vol}, ${b.page})">
+        <div>
+          <div class="bm-title">${b.title}</div>
+          <div class="bm-time">${b.time}</div>
+        </div>
+        <div class="bm-del-btn" onclick="removeBookmark(${b.id}, event)" title="删除书签">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function jumpToBookmark(vol, page) {
+    playSeClick();
+    closeAllDrawers();
+    switchVolume(vol, page);
+  }
+
+  // --- 3. Volume Switching & Drawer ---
+  function renderVolumeList() {
+    const container = document.getElementById('volumeList');
+    const prog = JSON.parse(localStorage.getItem(STORAGE_KEY_PROGRESS) || "{}");
+    container.innerHTML = volumes.map(v => {
+      const p = prog[v.id] || 0;
+      const pct = Math.round((p / v.pages) * 100);
+      const progressText = p > 0 ? `已读至第 ${p} / ${v.pages} 页` : `未读 (共 ${v.pages} 页)`;
+      return `
+        <div class="vol-card ${v.id === currentVol ? 'active' : ''}" onclick="onSelectVolume(${v.id})">
+          <div class="vol-num">${String(v.id).padStart(2, '0')}</div>
+          <div class="vol-details">
+            <div class="vol-name">${v.title}</div>
+            <div class="vol-progress-row">
+              <span>${progressText}</span>
+              ${p > 0 ? `<span>${pct}%</span>` : ''}
+            </div>
+            <div class="vol-mini-bar">
+              <div class="vol-mini-fill" style="width: ${pct}%"></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function onSelectVolume(volId) {
+    playSeClick();
+    closeAllDrawers();
+    const prog = JSON.parse(localStorage.getItem(STORAGE_KEY_PROGRESS) || "{}");
+    const targetPage = prog[volId] || 1;
+    switchVolume(volId, targetPage);
+  }
+
+  function switchVolume(volId, targetPage = 1) {
+    currentVol = volId;
+    const volMeta = volumes.find(v => v.id === volId);
+    mangaTitle.textContent = volMeta.title;
+    
+    const maxP = volId === 1 ? volMeta.sampleAvailable : volMeta.pages;
+    pageSlider.max = maxP;
+    currentPage = Math.min(targetPage, maxP);
+    renderPage();
+    renderVolumeList();
+  }
+
+  // --- 4. Page Rendering & Navigation ---
+  function renderPage() {
+    pageSlider.value = currentPage;
+    const volMeta = volumes.find(v => v.id === currentVol);
+    const maxAvailable = currentVol === 1 ? volMeta.sampleAvailable : volMeta.pages;
+
+    if (isDualPage) {
+      spreadContainer.classList.add('dual-mode');
+      if (currentPage === 1) {
+        pageRight.src = `./sample_manga_vol01/001.webp`;
+        pageLeft.style.display = 'none';
+        spreadContainer.classList.remove('dual-mode'); // 封面单张不展示中缝
+        pageIndicator.textContent = `1 / ${maxAvailable}`;
+        mangaSubTitle.textContent = `第 1 / ${volMeta.pages} 页 (封面)`;
+      } else {
+        const rIndex = currentPage % 2 === 0 ? currentPage - 1 : currentPage - 2;
+        const lIndex = rIndex + 1;
+        const fileR = String(rIndex + 1).padStart(3, '0') + '.webp';
+        pageRight.src = `./sample_manga_vol01/${fileR}`;
+        pageRight.style.display = 'block';
+
+        if (lIndex < maxAvailable) {
+          const fileL = String(lIndex + 1).padStart(3, '0') + '.webp';
+          pageLeft.src = `./sample_manga_vol01/${fileL}`;
+          pageLeft.style.display = 'block';
+          pageIndicator.textContent = `${rIndex + 1}-${lIndex + 1} / ${maxAvailable}`;
+          mangaSubTitle.textContent = `第 ${rIndex + 1}-${lIndex + 1} / ${volMeta.pages} 页`;
+        } else {
+          pageLeft.style.display = 'none';
+          spreadContainer.classList.remove('dual-mode');
+          pageIndicator.textContent = `${rIndex + 1} / ${maxAvailable}`;
+          mangaSubTitle.textContent = `第 ${rIndex + 1} / ${volMeta.pages} 页`;
+        }
+      }
+    } else {
+      spreadContainer.classList.remove('dual-mode');
+      const file = String(currentPage).padStart(3, '0') + '.webp';
+      pageRight.src = `./sample_manga_vol01/${file}`;
+      pageLeft.style.display = 'none';
+      pageIndicator.textContent = `${currentPage} / ${maxAvailable}`;
+      mangaSubTitle.textContent = `第 ${currentPage} / ${volMeta.pages} 页`;
+    }
+
+    saveHistory();
+  }
+
+  function navigate(dir) {
+    const volMeta = volumes.find(v => v.id === currentVol);
+    const maxAvailable = currentVol === 1 ? volMeta.sampleAvailable : volMeta.pages;
+    const step = isDualPage && currentPage > 1 ? 2 : 1;
+
+    if (dir === 'next') { // 日漫 RTL：下一页为向左
+      if (currentPage + step <= maxAvailable) {
+        currentPage += step;
+        playSeClick();
+      } else {
+        currentPage = maxAvailable;
+      }
+    } else if (dir === 'prev') {
+      if (currentPage - step >= 1) {
+        currentPage -= step;
+        playSeClick();
+      } else {
+        currentPage = 1;
+      }
+    }
+    renderPage();
+  }
+
+  function onSliderChange(val) {
+    currentPage = parseInt(val, 10);
+    renderPage();
+  }
+
+  function toggleBars() {
+    barsVisible = !barsVisible;
+    topBar.classList.toggle('hidden', !barsVisible);
+    bottomBar.classList.toggle('hidden', !barsVisible);
+  }
+
+  function toggleLayout() {
+    playSeClick();
+    isDualPage = !isDualPage;
+    modeText.textContent = isDualPage ? "双页(RTL)" : "单页流";
+    renderPage();
+  }
+
+  // --- 5. Drawers Management ---
+  function openDrawer(type) {
+    playSeClick();
+    document.getElementById('drawerOverlay').classList.add('active');
+    if (type === 'volume') {
+      renderVolumeList();
+      document.getElementById('volumeDrawer').classList.add('open');
+    } else if (type === 'bookmark') {
+      renderBookmarkList();
+      document.getElementById('bookmarkDrawer').classList.add('open');
+    }
+  }
+
+  function closeAllDrawers() {
+    document.getElementById('drawerOverlay').classList.remove('active');
+    document.getElementById('volumeDrawer').classList.remove('open');
+    document.getElementById('bookmarkDrawer').classList.remove('open');
+  }
+
+  function closeReader() {
+    playSeClick();
+    alert("触发返回 WebGAL 标题页：\nwindow.dispatch(setVisibility({ component: 'showMangaReader', visibility: false }))");
+  }
+
+  // Keyboard Shortcuts
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') navigate('next');
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') navigate('prev');
+    else if (e.key === 'm' || e.key === 'M') toggleLayout();
+    else if (e.key === 'b' || e.key === 'B') toggleBookmark();
+    else if (e.key === 'Escape') {
+      const overlay = document.getElementById('drawerOverlay');
+      if (overlay.classList.contains('active')) closeAllDrawers();
+      else closeReader();
+    }
+  });
+
+  // Touch Swipe Support for Mobile/Android WebView
+  let touchStartX = 0;
+  let touchStartY = 0;
+  window.addEventListener('touchstart', (e) => {
+    touchStartX = e.changedTouches[0].screenX;
+    touchStartY = e.changedTouches[0].screenY;
+  }, { passive: true });
+
+  window.addEventListener('touchend', (e) => {
+    const diffX = e.changedTouches[0].screenX - touchStartX;
+    const diffY = e.changedTouches[0].screenY - touchStartY;
+    if (Math.abs(diffX) > 45 && Math.abs(diffY) < 60) {
+      // 日漫 RTL：向左滑为下一页，向右滑为上一页
+      if (diffX < 0) navigate('next');
+      else navigate('prev');
+    }
+  }, { passive: true });
+
+  // Init
+  checkHistoryOnStartup();
+  renderPage();
+</script>
+</body>
+</html>

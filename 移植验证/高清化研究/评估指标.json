@@ -1,0 +1,500 @@
+{
+  "BG_0218": {
+    "nearest4": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 4.61,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 0.12
+    },
+    "lanczos4": {
+      "psnr_rgb": 38.93,
+      "psnr_alpha": 39.62,
+      "ssim": 0.996,
+      "sharp": 5.3,
+      "edge_spill": 196.71,
+      "factor": 4,
+      "seconds": 1.12
+    },
+    "nearest2": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 9.23,
+      "edge_spill": 0.0,
+      "factor": 2,
+      "seconds": 0.11
+    },
+    "lanczos2": {
+      "psnr_rgb": 40.15,
+      "psnr_alpha": 39.9,
+      "ssim": 0.9967,
+      "sharp": 9.97,
+      "edge_spill": 193.35,
+      "factor": 2,
+      "seconds": 0.26
+    },
+    "esrgan_v3_x3": {
+      "psnr_rgb": 29.16,
+      "psnr_alpha": 40.0,
+      "ssim": 0.9576,
+      "sharp": 6.76,
+      "edge_spill": 198.51,
+      "factor": 3,
+      "seconds": 1.78
+    },
+    "esrgan_v3_x4": {
+      "psnr_rgb": 29.38,
+      "psnr_alpha": 39.08,
+      "ssim": 0.9584,
+      "sharp": 5.15,
+      "edge_spill": 199.7,
+      "factor": 4,
+      "seconds": 2.34
+    },
+    "esrgan_anime_x4": {
+      "psnr_rgb": 26.53,
+      "psnr_alpha": 39.08,
+      "ssim": 0.9247,
+      "sharp": 6.4,
+      "edge_spill": 199.97,
+      "factor": 4,
+      "seconds": 9.32
+    },
+    "cugan_up3x": {
+      "psnr_rgb": 27.93,
+      "psnr_alpha": 40.0,
+      "ssim": 0.9404,
+      "sharp": 7.55,
+      "edge_spill": 198.68,
+      "factor": 3,
+      "seconds": 3.57
+    },
+    "cugan_up2x": {
+      "psnr_rgb": 26.84,
+      "psnr_alpha": 39.38,
+      "ssim": 0.9196,
+      "sharp": 10.61,
+      "edge_spill": 194.5,
+      "factor": 2,
+      "seconds": 2.23
+    }
+  },
+  "BG_0000": {
+    "nearest4": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 0.0,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 0.09
+    },
+    "lanczos4": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 0.0,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 0.19
+    },
+    "nearest2": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 0.0,
+      "edge_spill": 0.0,
+      "factor": 2,
+      "seconds": 0.02
+    },
+    "lanczos2": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 0.0,
+      "edge_spill": 0.0,
+      "factor": 2,
+      "seconds": 0.06
+    },
+    "esrgan_v3_x3": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 0.0,
+      "edge_spill": 0.0,
+      "factor": 3,
+      "seconds": 2.01
+    },
+    "esrgan_v3_x4": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 0.0,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 1.98
+    },
+    "esrgan_anime_x4": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 0.0,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 6.98
+    },
+    "cugan_up3x": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 0.0,
+      "edge_spill": 0.0,
+      "factor": 3,
+      "seconds": 3.17
+    },
+    "cugan_up2x": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 0.0,
+      "edge_spill": 0.0,
+      "factor": 2,
+      "seconds": 2.31
+    }
+  },
+  "CHR_0000": {
+    "nearest4": {
+      "psnr_rgb": 49.18,
+      "psnr_alpha": 99.0,
+      "ssim": 0.999,
+      "sharp": 1.51,
+      "edge_spill": 179.95,
+      "factor": 4,
+      "seconds": 0.17
+    },
+    "lanczos4": {
+      "psnr_rgb": 35.46,
+      "psnr_alpha": 45.21,
+      "ssim": 0.9753,
+      "sharp": 1.84,
+      "edge_spill": 187.59,
+      "factor": 4,
+      "seconds": 0.51
+    },
+    "nearest2": {
+      "psnr_rgb": 49.18,
+      "psnr_alpha": 99.0,
+      "ssim": 0.999,
+      "sharp": 3.02,
+      "edge_spill": 179.95,
+      "factor": 2,
+      "seconds": 0.07
+    },
+    "lanczos2": {
+      "psnr_rgb": 36.78,
+      "psnr_alpha": 46.01,
+      "ssim": 0.9622,
+      "sharp": 3.3,
+      "edge_spill": 188.39,
+      "factor": 2,
+      "seconds": 0.13
+    },
+    "esrgan_v3_x3": {
+      "psnr_rgb": 33.06,
+      "psnr_alpha": 45.1,
+      "ssim": 0.9878,
+      "sharp": 2.37,
+      "edge_spill": 188.25,
+      "factor": 3,
+      "seconds": 1.62
+    },
+    "esrgan_v3_x4": {
+      "psnr_rgb": 33.62,
+      "psnr_alpha": 44.57,
+      "ssim": 0.9894,
+      "sharp": 1.82,
+      "edge_spill": 189.82,
+      "factor": 4,
+      "seconds": 1.74
+    },
+    "esrgan_anime_x4": {
+      "psnr_rgb": 30.43,
+      "psnr_alpha": 44.57,
+      "ssim": 0.9804,
+      "sharp": 2.04,
+      "edge_spill": 187.91,
+      "factor": 4,
+      "seconds": 7.07
+    },
+    "cugan_up3x": {
+      "psnr_rgb": 27.26,
+      "psnr_alpha": 45.1,
+      "ssim": 0.9693,
+      "sharp": 3.12,
+      "edge_spill": 186.4,
+      "factor": 3,
+      "seconds": 3.32
+    },
+    "cugan_up2x": {
+      "psnr_rgb": 25.46,
+      "psnr_alpha": 45.07,
+      "ssim": 0.9589,
+      "sharp": 4.56,
+      "edge_spill": 189.15,
+      "factor": 2,
+      "seconds": 1.89
+    }
+  },
+  "CHR_0452_bust": {
+    "nearest4": {
+      "psnr_rgb": 71.44,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 13.75,
+      "edge_spill": 42.31,
+      "factor": 4,
+      "seconds": 0.01
+    },
+    "lanczos4": {
+      "psnr_rgb": 31.06,
+      "psnr_alpha": 54.88,
+      "ssim": 0.9884,
+      "sharp": 14.79,
+      "edge_spill": 44.7,
+      "factor": 4,
+      "seconds": 0.08
+    },
+    "nearest2": {
+      "psnr_rgb": 71.44,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 27.51,
+      "edge_spill": 42.31,
+      "factor": 2,
+      "seconds": 0.01
+    },
+    "lanczos2": {
+      "psnr_rgb": 32.47,
+      "psnr_alpha": 55.41,
+      "ssim": 0.9917,
+      "sharp": 27.16,
+      "edge_spill": 44.32,
+      "factor": 2,
+      "seconds": 0.02
+    },
+    "esrgan_v3_x3": {
+      "psnr_rgb": 28.66,
+      "psnr_alpha": 55.55,
+      "ssim": 0.9813,
+      "sharp": 23.33,
+      "edge_spill": 49.3,
+      "factor": 3,
+      "seconds": 0.76
+    },
+    "esrgan_v3_x4": {
+      "psnr_rgb": 29.05,
+      "psnr_alpha": 54.42,
+      "ssim": 0.9827,
+      "sharp": 17.99,
+      "edge_spill": 48.8,
+      "factor": 4,
+      "seconds": 1.16
+    },
+    "esrgan_anime_x4": {
+      "psnr_rgb": 26.44,
+      "psnr_alpha": 54.42,
+      "ssim": 0.9659,
+      "sharp": 20.03,
+      "edge_spill": 49.34,
+      "factor": 4,
+      "seconds": 2.02
+    },
+    "cugan_up3x": {
+      "psnr_rgb": 28.08,
+      "psnr_alpha": 55.55,
+      "ssim": 0.9773,
+      "sharp": 24.32,
+      "edge_spill": 45.23,
+      "factor": 3,
+      "seconds": 0.78
+    },
+    "cugan_up2x": {
+      "psnr_rgb": 26.25,
+      "psnr_alpha": 55.65,
+      "ssim": 0.9641,
+      "sharp": 31.22,
+      "edge_spill": 49.68,
+      "factor": 2,
+      "seconds": 0.93
+    }
+  },
+  "EV_0126": {
+    "nearest4": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 5.69,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 0.2
+    },
+    "lanczos4": {
+      "psnr_rgb": 40.24,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9956,
+      "sharp": 6.1,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 1.29
+    },
+    "nearest2": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 11.37,
+      "edge_spill": 0.0,
+      "factor": 2,
+      "seconds": 0.12
+    },
+    "lanczos2": {
+      "psnr_rgb": 41.66,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9967,
+      "sharp": 11.37,
+      "edge_spill": 0.0,
+      "factor": 2,
+      "seconds": 0.34
+    },
+    "esrgan_v3_x3": {
+      "psnr_rgb": 30.28,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9601,
+      "sharp": 9.3,
+      "edge_spill": 0.0,
+      "factor": 3,
+      "seconds": 1.43
+    },
+    "esrgan_v3_x4": {
+      "psnr_rgb": 30.67,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9625,
+      "sharp": 7.15,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 3.18
+    },
+    "esrgan_anime_x4": {
+      "psnr_rgb": 27.84,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9306,
+      "sharp": 8.33,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 7.85
+    },
+    "cugan_up3x": {
+      "psnr_rgb": 30.96,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9568,
+      "sharp": 9.35,
+      "edge_spill": 0.0,
+      "factor": 3,
+      "seconds": 2.91
+    },
+    "cugan_up2x": {
+      "psnr_rgb": 29.95,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9465,
+      "sharp": 12.75,
+      "edge_spill": 0.0,
+      "factor": 2,
+      "seconds": 1.46
+    }
+  },
+  "ETC_095": {
+    "nearest4": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 31.0,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 0.21
+    },
+    "lanczos4": {
+      "psnr_rgb": 25.28,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9712,
+      "sharp": 31.4,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 2.09
+    },
+    "nearest2": {
+      "psnr_rgb": 99.0,
+      "psnr_alpha": 99.0,
+      "ssim": 1.0,
+      "sharp": 62.0,
+      "edge_spill": 0.0,
+      "factor": 2,
+      "seconds": 0.08
+    },
+    "lanczos2": {
+      "psnr_rgb": 26.71,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9799,
+      "sharp": 55.15,
+      "edge_spill": 0.0,
+      "factor": 2,
+      "seconds": 0.56
+    },
+    "esrgan_v3_x3": {
+      "psnr_rgb": 21.23,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9499,
+      "sharp": 63.69,
+      "edge_spill": 0.0,
+      "factor": 3,
+      "seconds": 1.19
+    },
+    "esrgan_v3_x4": {
+      "psnr_rgb": 22.21,
+      "psnr_alpha": 99.0,
+      "ssim": 0.9582,
+      "sharp": 48.51,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 1.48
+    },
+    "esrgan_anime_x4": {
+      "psnr_rgb": 8.04,
+      "psnr_alpha": 99.0,
+      "ssim": 0.0158,
+      "sharp": 0.41,
+      "edge_spill": 0.0,
+      "factor": 4,
+      "seconds": 4.78
+    },
+    "cugan_up3x": {
+      "psnr_rgb": 21.6,
+      "psnr_alpha": 99.0,
+      "ssim": 0.942,
+      "sharp": 54.82,
+      "edge_spill": 0.0,
+      "factor": 3,
+      "seconds": 2.29
+    },
+    "cugan_up2x": {
+      "psnr_rgb": 18.51,
+      "psnr_alpha": 99.0,
+      "ssim": 0.8874,
+      "sharp": 69.98,
+      "edge_spill": 0.0,
+      "factor": 2,
+      "seconds": 1.41
+    }
+  }
+}
